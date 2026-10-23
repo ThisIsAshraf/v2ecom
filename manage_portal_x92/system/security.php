@@ -20,7 +20,11 @@ $availablePermissions = [
     'social'     => 'Social Media Feed',
     'reviews'    => 'Customer Reviews',
     'env'        => '.ENV Configuration Manager',
+    'security'   => 'Admin Security & RBAC',
 ];
+
+// High-Risk Security Sensitive Keys Styled with Red Text
+$sensitiveKeys = ['analytics', 'env', 'security'];
 
 // Helper Function to Parse Browser & Device Type from User Agent
 function parse_user_agent(?string $ua): array
@@ -479,7 +483,7 @@ $currentMaxSessions = (int)site_setting('max_admin_sessions', '2');
                         <?php else: ?>
                             <div style="display:flex; flex-wrap:wrap; gap:4px;">
                                 <?php foreach ($pArr as $pk): ?>
-                                    <span style="background:#e8f4f8; color:#16a085; padding:2px 6px; border-radius:3px; font-size:11px;">
+                                    <span style="background:#e8f4f8; color:<?= in_array($pk, $sensitiveKeys, true) ? '#d32f2f' : '#16a085' ?>; padding:2px 6px; border-radius:3px; font-size:11px; font-weight:<?= in_array($pk, $sensitiveKeys, true) ? 'bold' : 'normal' ?>;">
                                         <?= e($availablePermissions[$pk] ?? $pk) ?>
                                     </span>
                                 <?php endforeach; ?>
@@ -552,7 +556,8 @@ $currentMaxSessions = (int)site_setting('max_admin_sessions', '2');
                         <label style="font-weight:bold; display:block; margin-bottom:8px;">Assigned Module Access Permissions:</label>
                         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:10px; background:#fff; padding:15px; border-radius:6px; border:1px solid #e0e0e0;">
                             <?php foreach ($availablePermissions as $key => $label): ?>
-                                <label style="font-size:13px; font-weight:normal; cursor:pointer;">
+                                <?php $isSensitive = in_array($key, $sensitiveKeys, true); ?>
+                                <label style="font-size:13px; font-weight:<?= $isSensitive ? 'bold' : 'normal' ?>; color:<?= $isSensitive ? '#d32f2f' : '#333' ?>; cursor:pointer;">
                                     <input type="checkbox" name="permissions[]" value="<?= $key ?>" <?= in_array($key, $currPerms, true) ? 'checked' : '' ?> style="width:auto; margin-right:5px;">
                                     <?= e($label) ?>
                                 </label>
@@ -593,7 +598,8 @@ $currentMaxSessions = (int)site_setting('max_admin_sessions', '2');
                     <label style="font-weight:bold; display:block; margin-bottom:8px;">Grant Module Access Permissions:</label>
                     <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:10px; background:#f9f9f9; padding:15px; border-radius:6px; border:1px solid #eee;">
                         <?php foreach ($availablePermissions as $key => $label): ?>
-                            <label style="font-size:13px; font-weight:normal; cursor:pointer;">
+                            <?php $isSensitive = in_array($key, $sensitiveKeys, true); ?>
+                            <label style="font-size:13px; font-weight:<?= $isSensitive ? 'bold' : 'normal' ?>; color:<?= $isSensitive ? '#d32f2f' : '#333' ?>; cursor:pointer;">
                                 <input type="checkbox" name="permissions[]" value="<?= $key ?>" style="width:auto; margin-right:5px;">
                                 <?= e($label) ?>
                             </label>

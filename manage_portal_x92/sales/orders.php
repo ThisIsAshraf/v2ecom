@@ -2,6 +2,59 @@
 admin_required();
 require_permission('orders');
 
+$statusFilter = (string)($_GET['status'] ?? '');
+$search       = trim((string)($_GET['q'] ?? ''));
+
+// Build Base Query & Dynamic Parameters
+$whereClauses = [];
+$params       = [];
+
+if ($statusFilter !== '') {
+    $whereClauses[] = 'status = ?';
+    $params[] = $statusFilter;
+}
+
+if ($search !== '') {
+    $whereClauses[] = '(order_number LIKE ? OR customer_name LIKE ? OR customer_email LIKE ? OR customer_phone LIKE ? OR city LIKE ?)';
+    $term = '%' . $search . '%';
+    array_push($params, $term, $term, $term, $term, $term);
+}
+
+$whereSql = $whereClauses ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
+
+// --- CSV EXPORT HANDLER ---
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $filename = 'orders-export-' . date('Y-m-d-His') . '.csv';
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Order Number', 'Date', 'Customer Name', 'Email', 'Phone', 'City', 'Subtotal', 'Discount', 'Shipping', 'Total', 'Status']);
+
+    $exportSql = "SELECT * FROM orders $whereSql ORDER BY id DESC";
+    $stmt = db()->prepare($exportSql);
+    $stmt->execute($params);
+
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        fputcsv($out, [
+            $row['order_number'],
+            $row['created_at'],
+            $row['customer_name'],
+            $row['customer_email'],
+            $row['customer_phone'],
+            $row['city'],
+            $row['subtotal'],
+            $row['discount_amount'],
+            $row['shipping_amount'],
+            $row['total'],
+            ucfirst($row['status'])
+        ]);
+    }
+    fclose($out);
+    exit;
+}
+
+// POST Handler: Update Order Status
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $id = (int)($_POST['id'] ?? 0);
@@ -41,7 +94,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $linesStmt->execute([$id]);
                 $orderItems = $linesStmt->fetchAll();
 
-                // Send Official Invoice Email to Customer
                 email_order_customer($order, $orderItems);
                 flash('success', 'Order #' . $order['order_number'] . ' confirmed and official invoice emailed to customer!');
             } else {
@@ -55,6 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('admin/sales/orders' . ($id ? '?id=' . $id : ''));
 }
 
+// Inspection Details Query
 $detail = null;
 $lines = [];
 $history = [];
@@ -73,16 +126,21 @@ if (isset($_GET['id'])) {
     }
 }
 
-$statusFilter = (string)($_GET['status'] ?? '');
-$sql = 'SELECT * FROM orders';
-$args = [];
-if ($statusFilter !== '') {
-    $sql .= ' WHERE status=?';
-    $args[] = $statusFilter;
-}
-$sql .= ' ORDER BY id DESC LIMIT 200';
-$s = db()->prepare($sql);
-$s->execute($args);
+// --- PAGINATION LOGIC ---
+$page  = max(1, (int)($_GET['page'] ?? 1));
+$limit = 10;
+
+$countStmt = db()->prepare("SELECT COUNT(*) FROM orders $whereSql");
+$countStmt->execute($params);
+$totalOrders = (int)$countStmt->fetchColumn();
+
+$totalPages = max(1, (int)ceil($totalOrders / $limit));
+if ($page > $totalPages) $page = $totalPages;
+$offset = ($page - 1) * $limit;
+
+$pSql = "SELECT * FROM orders $whereSql ORDER BY id DESC LIMIT $limit OFFSET $offset";
+$s = db()->prepare($pSql);
+$s->execute($params);
 $orders = $s->fetchAll();
 
 admin_header('Order Management');
@@ -184,7 +242,6 @@ $logoUrl = site_setting('logo_url', '');
 
 <?php if ($detail): ?>
     <div class="invoice-card" id="printable-invoice">
-
         <!-- Admin Controls Bar (No Print) -->
         <div class="section-heading no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 25px;">
             <div>
@@ -285,7 +342,7 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Footer Thank You Note -->
+        <!-- Footer Note -->
         <div style="margin-top:40px; border-top:1px solid #eee; padding-top:15px; text-align:center; color:#777; font-size:13px;">
             <p style="margin:0; font-weight:600;"><?= e($invoiceNote) ?></p>
         </div>
@@ -318,17 +375,24 @@ $logoUrl = site_setting('logo_url', '');
 
 <!-- Master Orders List Table -->
 <div class="panel">
-    <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-        <h2>All Orders</h2>
-        <form class="inline-form" method="get" style="display:flex; gap:8px;">
-            <select name="status" style="padding:6px 10px;">
-                <option value="">All Statuses</option>
-                <?php foreach (['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'] as $st): ?>
-                    <option value="<?= $st ?>" <?= $statusFilter === $st ? 'selected' : '' ?>><?= ucfirst($st) ?></option>
-                <?php endforeach; ?>
-            </select>
-            <button class="button secondary">Filter</button>
-        </form>
+    <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:15px;">
+        <h2>All Orders (<?= number_format($totalOrders) ?>)</h2>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <form class="inline-form" method="get" style="display:flex; gap:6px; margin:0;">
+                <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search order #, customer, phone..." style="padding:6px 10px; font-size:13px; border:1px solid #ccc; border-radius:4px; width:200px;">
+                <select name="status" style="padding:6px 10px; font-size:13px;">
+                    <option value="">All Statuses</option>
+                    <?php foreach (['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'] as $st): ?>
+                        <option value="<?= $st ?>" <?= $statusFilter === $st ? 'selected' : '' ?>><?= ucfirst($st) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button class="button secondary" style="padding:6px 12px; font-size:13px;">Filter</button>
+                <?php if ($search !== '' || $statusFilter !== ''): ?>
+                    <a href="<?= e(url('admin/sales/orders')) ?>" class="button secondary" style="padding:6px 10px; font-size:13px;">Reset</a>
+                <?php endif; ?>
+            </form>
+            <a href="<?= e(url('admin/sales/orders?export=csv' . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:6px 12px; font-size:13px;">📥 Export CSV</a>
+        </div>
     </div>
 
     <div class="table-wrap">
@@ -368,6 +432,23 @@ $logoUrl = site_setting('logo_url', '');
             </tbody>
         </table>
     </div>
+
+    <!-- Pagination Controls -->
+    <?php if ($totalPages > 1): ?>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; padding-top:12px; border-top:1px solid #eee;">
+            <span class="small muted">
+                Page <b><?= $page ?></b> of <b><?= $totalPages ?></b>
+            </span>
+            <div style="display:flex; gap:6px;">
+                <?php if ($page > 1): ?>
+                    <a href="<?= e(url('admin/sales/orders?page=' . ($page - 1) . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:4px 10px; font-size:12px;">← Previous</a>
+                <?php endif; ?>
+                <?php if ($page < $totalPages): ?>
+                    <a href="<?= e(url('admin/sales/orders?page=' . ($page + 1) . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:4px 10px; font-size:12px;">Next →</a>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
 </div>
 
 <?php admin_footer(); ?>
