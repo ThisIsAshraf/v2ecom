@@ -2,9 +2,146 @@
 admin_required();
 require_permission('products');
 
+// Download CSV Sample Import Template
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="products-import-sample.csv"');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['name', 'sku', 'category', 'price', 'compare_price', 'stock', 'description', 'image_url']);
+    fputcsv($out, ['Cotton Oxford Shirt', 'SHIRT-OX-001', 'Men Casual', '1450.00', '1850.00', '25', 'Premium breathable cotton shirt.', 'https://example.com/shirt.jpg']);
+    fputcsv($out, ['Floral Printed Kurti', 'KURTI-FL-002', 'Women Ethnic', '2200.00', '2600.00', '15', 'Lightweight 3-piece set with dupatta.', '']);
+    fclose($out);
+    exit;
+}
+
+// CSV Export Handler
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $filename = 'products-export-' . date('Y-m-d-His') . '.csv';
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Product ID', 'Name', 'SKU', 'Category', 'Price', 'Compare-at Price', 'Stock', 'Status', 'Image URL']);
+
+    $exportQuery = 'SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.id DESC';
+    $exportStmt = db()->query($exportQuery);
+    while ($row = $exportStmt->fetch(PDO::FETCH_ASSOC)) {
+        fputcsv($out, [
+            $row['id'],
+            $row['name'],
+            $row['sku'],
+            $row['category_name'] ?? 'Uncategorised',
+            $row['price'],
+            $row['compare_price'] ?? '0.00',
+            $row['stock'],
+            !empty($row['active']) ? 'Active' : 'Hidden',
+            $row['image_url']
+        ]);
+    }
+    fclose($out);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string)($_POST['action'] ?? '');
+
+    // --- BULK CSV IMPORT HANDLER ---
+    if ($action === 'import_csv') {
+        if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+            flash('error', 'Please upload a valid CSV file.');
+            redirect('admin/catalog/products');
+        }
+
+        $tmpFile = $_FILES['csv_file']['tmp_name'];
+        $ext = strtolower(pathinfo($_FILES['csv_file']['name'], PATHINFO_EXTENSION));
+
+        if ($ext !== 'csv') {
+            flash('error', 'Invalid file type. Only CSV files (.csv) are supported.');
+            redirect('admin/catalog/products');
+        }
+
+        $handle = fopen($tmpFile, 'r');
+        if (!$handle) {
+            flash('error', 'Could not open the uploaded CSV file.');
+            redirect('admin/catalog/products');
+        }
+
+        $headers = fgetcsv($handle);
+        if (!$headers) {
+            fclose($handle);
+            flash('error', 'CSV file appears to be empty.');
+            redirect('admin/catalog/products');
+        }
+
+        // Standardize Header Column Map
+        $headerMap = [];
+        foreach ($headers as $idx => $colName) {
+            $key = strtolower(trim($colName));
+            $headerMap[$key] = $idx;
+        }
+
+        $imported = 0;
+        $updated  = 0;
+        $skipped  = 0;
+
+        while (($row = fgetcsv($handle)) !== false) {
+            if (empty(array_filter($row))) continue; // Skip blank lines
+
+            $name     = trim((string)($row[$headerMap['name'] ?? 0] ?? ''));
+            $sku      = trim((string)($row[$headerMap['sku'] ?? 1] ?? ''));
+            $catName  = trim((string)($row[$headerMap['category'] ?? 2] ?? ''));
+            $price    = (float)($row[$headerMap['price'] ?? 3] ?? 0);
+            $compare  = (float)($row[$headerMap['compare_price'] ?? 4] ?? 0);
+            $stock    = max(0, (int)($row[$headerMap['stock'] ?? 5] ?? 0));
+            $desc     = trim((string)($row[$headerMap['description'] ?? 6] ?? ''));
+            $imageUrl = trim((string)($row[$headerMap['image_url'] ?? 7] ?? ''));
+
+            if ($name === '' || $sku === '' || $price < 0) {
+                $skipped++;
+                continue;
+            }
+
+            // Category Lookup & Auto-Creation
+            $catId = null;
+            if ($catName !== '') {
+                $catSlug = strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', $catName), '-'));
+                $findCat = db()->prepare('SELECT id FROM categories WHERE name = ? OR slug = ?');
+                $findCat->execute([$catName, $catSlug]);
+                $existingCat = $findCat->fetch();
+
+                if ($existingCat) {
+                    $catId = (int)$existingCat['id'];
+                } else {
+                    $insCat = db()->prepare('INSERT INTO categories (name, slug) VALUES (?, ?)');
+                    $insCat->execute([$catName, $catSlug]);
+                    $catId = (int)db()->lastInsertId();
+                }
+            }
+
+            $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', $name), '-'));
+
+            // Upsert Logic Match on Existing SKU
+            $checkProduct = db()->prepare('SELECT id FROM products WHERE sku = ?');
+            $checkProduct->execute([$sku]);
+            $existingProduct = $checkProduct->fetch();
+
+            if ($existingProduct) {
+                $up = db()->prepare('UPDATE products SET category_id=?, name=?, slug=?, description=?, price=?, compare_price=?, image_url=?, stock=? WHERE id=?');
+                $up->execute([$catId, $name, $slug, $desc, $price, $compare ?: null, $imageUrl, $stock, $existingProduct['id']]);
+                $updated++;
+            } else {
+                $ins = db()->prepare('INSERT INTO products (category_id, name, slug, sku, description, price, compare_price, image_url, stock, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
+                $ins->execute([$catId, $name, $slug, $sku, $desc, $price, $compare ?: null, $imageUrl, $stock]);
+                $imported++;
+            }
+        }
+        fclose($handle);
+
+        flash('success', "Bulk Import Complete: $imported new products inserted, $updated existing updated, $skipped skipped due to invalid data.");
+        redirect('admin/catalog/products');
+    }
 
     if ($action === 'delete_gallery_image') {
         $imgId = (int)($_POST['image_id'] ?? 0);
@@ -133,9 +270,61 @@ if (isset($_GET['edit'])) {
 }
 
 $cats = db()->query('SELECT * FROM categories ORDER BY name')->fetchAll();
-$products = db()->query('SELECT p.*, c.name category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id ORDER BY p.id DESC')->fetchAll();
+
+// --- SEARCH & PAGINATION LOGIC ---
+$search = trim((string)($_GET['q'] ?? ''));
+$page   = max(1, (int)($_GET['page'] ?? 1));
+$limit  = 10;
+
+$whereSql = '';
+$params   = [];
+
+if ($search !== '') {
+    $whereSql = 'WHERE p.name LIKE ? OR p.sku LIKE ? OR c.name LIKE ?';
+    $term = '%' . $search . '%';
+    $params = [$term, $term, $term];
+}
+
+$countStmt = db()->prepare("SELECT COUNT(*) FROM products p LEFT JOIN categories c ON c.id=p.category_id $whereSql");
+$countStmt->execute($params);
+$totalProducts = (int)$countStmt->fetchColumn();
+
+$totalPages = max(1, (int)ceil($totalProducts / $limit));
+if ($page > $totalPages) $page = $totalPages;
+$offset = ($page - 1) * $limit;
+
+$pStmt = db()->prepare("
+    SELECT p.*, c.name AS category_name 
+    FROM products p 
+    LEFT JOIN categories c ON c.id=p.category_id 
+    $whereSql 
+    ORDER BY p.id DESC 
+    LIMIT $limit OFFSET $offset
+");
+$pStmt->execute($params);
+$products = $pStmt->fetchAll();
+
 admin_header('Products & inventory'); ?>
 
+<!-- Section: Bulk Import Products via CSV -->
+<div class="panel" style="margin-bottom:22px; background:#f0fdf4; border:1px solid #bbf7d0;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+            <h3 style="margin:0; color:#166534;">📦 Bulk Import Products</h3>
+            <p class="muted small" style="margin:4px 0 0 0;">Upload a CSV file to add or update multiple products simultaneously.</p>
+        </div>
+        <a href="<?= e(url('admin/catalog/products?download_template=csv')) ?>" class="button secondary" style="padding:6px 12px; font-size:12px; background:#fff;">📄 Download CSV Template</a>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" style="margin-top:15px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <?= csrf_field() ?>
+        <input type="hidden" name="action" value="import_csv">
+        <input type="file" name="csv_file" accept=".csv" required style="font-size:13px;">
+        <button type="submit" style="background:#15803d; border-color:#166534; padding:8px 16px;">Upload & Import CSV</button>
+    </form>
+</div>
+
+<!-- Section: Add / Edit Single Product Form -->
 <div class="panel" style="margin-bottom:22px">
     <h2><?= $edit ? 'Edit product' : 'Add a product' ?></h2>
     <form method="post" enctype="multipart/form-data">
@@ -195,8 +384,24 @@ admin_header('Products & inventory'); ?>
     </form>
 </div>
 
+<!-- Section: Inventory Table & Export -->
 <div class="panel">
-    <h2>Inventory</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; margin-bottom:15px;">
+        <div>
+            <h2 style="margin:0;">Inventory (<?= number_format($totalProducts) ?>)</h2>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <form method="get" style="display:flex; gap:6px; margin:0;">
+                <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search name, SKU, category..." style="padding:6px 10px; font-size:13px; border:1px solid #ccc; border-radius:4px; width:220px;">
+                <button type="submit" class="button secondary" style="padding:6px 12px; font-size:13px;">Search</button>
+                <?php if ($search !== ''): ?>
+                    <a href="<?= e(url('admin/catalog/products')) ?>" class="button secondary" style="padding:6px 10px; font-size:13px;">Reset</a>
+                <?php endif; ?>
+            </form>
+            <a href="<?= e(url('admin/catalog/products?export=csv')) ?>" class="button secondary" style="padding:6px 12px; font-size:13px;">📥 Export CSV</a>
+        </div>
+    </div>
+
     <div class="table-wrap">
         <table>
             <thead>
@@ -211,29 +416,51 @@ admin_header('Products & inventory'); ?>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($products as $p): ?>
+                <?php if (empty($products)): ?>
                     <tr>
-                        <td>
-                            <?php if (!empty($p['image_url'])): ?>
-                                <img src="<?= e(url($p['image_url'])) ?>" style="width:40px; height:40px; object-fit:cover; border-radius:4px;">
-                            <?php else: ?>
-                                <span class="muted small">No image</span>
-                            <?php endif; ?>
-                        </td>
-                        <td><b><?= e($p['name']) ?></b><br><span class="muted small"><?= e($p['sku']) ?></span></td>
-                        <td><?= e($p['category_name'] ?? '—') ?></td>
-                        <td><?= money($p['price']) ?></td>
-                        <td><span class="<?= ((int)$p['stock'] <= 5) ? 'notice error' : 'status' ?>"><?= (int)$p['stock'] ?></span></td>
-                        <td><?= !empty($p['active']) ? 'Active' : 'Hidden' ?></td>
-                        <td>
-                            <a href="<?= e(url('admin/catalog/products?edit=' . $p['id'])) ?>">Edit</a>
-                            <form method="post" style="display:inline"><?= csrf_field() ?><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?= $p['id'] ?>"><button class="button secondary" style="padding:6px 8px"><?= !empty($p['active']) ? 'Hide' : 'Show' ?></button></form>
-                        </td>
+                        <td colspan="7" style="text-align:center; padding:20px;" class="muted">No products found.</td>
                     </tr>
-                <?php endforeach; ?>
+                <?php else: ?>
+                    <?php foreach ($products as $p): ?>
+                        <tr>
+                            <td>
+                                <?php if (!empty($p['image_url'])): ?>
+                                    <img src="<?= e(url($p['image_url'])) ?>" style="width:40px; height:40px; object-fit:cover; border-radius:4px;">
+                                <?php else: ?>
+                                    <span class="muted small">No image</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><b><?= e($p['name']) ?></b><br><span class="muted small"><?= e($p['sku']) ?></span></td>
+                            <td><?= e($p['category_name'] ?? '—') ?></td>
+                            <td><?= money($p['price']) ?></td>
+                            <td><span class="<?= ((int)$p['stock'] <= 5) ? 'notice error' : 'status' ?>"><?= (int)$p['stock'] ?></span></td>
+                            <td><?= !empty($p['active']) ? 'Active' : 'Hidden' ?></td>
+                            <td>
+                                <a href="<?= e(url('admin/catalog/products?edit=' . $p['id'])) ?>">Edit</a>
+                                <form method="post" style="display:inline"><?= csrf_field() ?><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?= $p['id'] ?>"><button class="button secondary" style="padding:6px 8px"><?= !empty($p['active']) ? 'Hide' : 'Show' ?></button></form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </tbody>
         </table>
     </div>
+
+    <?php if ($totalPages > 1): ?>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; padding-top:12px; border-top:1px solid #eee;">
+            <span class="small muted">
+                Page <b><?= $page ?></b> of <b><?= $totalPages ?></b>
+            </span>
+            <div style="display:flex; gap:6px;">
+                <?php if ($page > 1): ?>
+                    <a href="<?= e(url('admin/catalog/products?page=' . ($page - 1) . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:4px 10px; font-size:12px;">← Previous</a>
+                <?php endif; ?>
+                <?php if ($page < $totalPages): ?>
+                    <a href="<?= e(url('admin/catalog/products?page=' . ($page + 1) . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:4px 10px; font-size:12px;">Next →</a>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
 </div>
 
 <?php admin_footer(); ?>

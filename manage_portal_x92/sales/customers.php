@@ -4,32 +4,18 @@ require_permission('customers');
 
 $search = trim((string)($_GET['q'] ?? ''));
 
-// SQL Query using MAX/ANY_VALUE for strict mode compliance
-$sql = "
-    SELECT 
-        customer_email,
-        MAX(customer_name) as customer_name,
-        customer_phone,
-        MAX(city) as city,
-        COUNT(id) as total_orders,
-        SUM(total) as lifetime_spend,
-        MAX(created_at) as last_order_date
-    FROM orders
-    WHERE status NOT IN ('cancelled', 'returned')
-";
-
+// SQL Query Base
+$whereSql = "WHERE status NOT IN ('cancelled', 'returned')";
 $params = [];
 
 if ($search !== '') {
-    $sql .= " AND (customer_name LIKE ? OR customer_email LIKE ? OR customer_phone LIKE ? OR city LIKE ?)";
+    $whereSql .= " AND (customer_name LIKE ? OR customer_email LIKE ? OR customer_phone LIKE ? OR city LIKE ?)";
     $params = ["%$search%", "%$search%", "%$search%", "%$search%"];
 }
 
-$sql .= " GROUP BY customer_email, customer_phone ORDER BY lifetime_spend DESC LIMIT 200";
-
 // Handle CSV Export
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-    $filename = strtolower(preg_replace('/[^A-Za-z0-9]+/', '-', store_name())) . '-customers-' . date('Y-m-d') . '.csv';
+    $filename = strtolower(preg_replace('/[^A-Za-z0-9]+/', '-', store_name())) . '-customers-' . date('Y-m-d-His') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     $out = fopen('php://output', 'w');
@@ -37,7 +23,22 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     // Header Row
     fputcsv($out, ['Customer Name', 'Email Address', 'Phone Number', 'City / Location', 'Total Orders', 'Lifetime Spend', 'Last Active Date']);
 
-    $stmt = db()->prepare($sql);
+    $exportSql = "
+        SELECT 
+            customer_email,
+            MAX(customer_name) as customer_name,
+            customer_phone,
+            MAX(city) as city,
+            COUNT(id) as total_orders,
+            SUM(total) as lifetime_spend,
+            MAX(created_at) as last_order_date
+        FROM orders
+        $whereSql
+        GROUP BY customer_email, customer_phone 
+        ORDER BY lifetime_spend DESC
+    ";
+
+    $stmt = db()->prepare($exportSql);
     $stmt->execute($params);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         fputcsv($out, [
@@ -53,6 +54,37 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fclose($out);
     exit;
 }
+
+// --- PAGINATION LOGIC ---
+$page  = max(1, (int)($_GET['page'] ?? 1));
+$limit = 10;
+
+// Count Total Unique Customers
+$countSql = "SELECT COUNT(DISTINCT customer_email, customer_phone) FROM orders $whereSql";
+$countStmt = db()->prepare($countSql);
+$countStmt->execute($params);
+$totalCustomers = (int)$countStmt->fetchColumn();
+
+$totalPages = max(1, (int)ceil($totalCustomers / $limit));
+if ($page > $totalPages) $page = $totalPages;
+$offset = ($page - 1) * $limit;
+
+// Fetch Paginated Customers
+$sql = "
+    SELECT 
+        customer_email,
+        MAX(customer_name) as customer_name,
+        customer_phone,
+        MAX(city) as city,
+        COUNT(id) as total_orders,
+        SUM(total) as lifetime_spend,
+        MAX(created_at) as last_order_date
+    FROM orders
+    $whereSql
+    GROUP BY customer_email, customer_phone 
+    ORDER BY lifetime_spend DESC 
+    LIMIT $limit OFFSET $offset
+";
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
@@ -76,17 +108,17 @@ admin_header('Customer Directory & Intelligence'); ?>
 <!-- Search Bar & Export Controls -->
 <div class="panel" style="margin-bottom: 22px;">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-        <h2>Customer Directory</h2>
+        <h2>Customer Directory (<?= number_format($totalCustomers) ?>)</h2>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
             <form method="get" class="inline-form" style="display:flex; gap:8px;">
                 <input name="q" value="<?= e($search) ?>" placeholder="Search name, email, phone, city..." style="padding: 6px 12px; min-width: 250px;">
                 <button class="button">Search</button>
                 <?php if ($search !== ''): ?>
-                    <a class="button secondary" href="<?= e(url('manage_portal_x92/customers.php')) ?>">Clear</a>
+                    <a class="button secondary" href="<?= e(url('admin/sales/customers')) ?>">Clear</a>
                 <?php endif; ?>
             </form>
 
-            <a class="button secondary" style="padding: 7px 14px; font-weight:bold;" href="<?= e(url('manage_portal_x92/customers.php?q=' . urlencode($search) . '&export=csv')) ?>">
+            <a class="button secondary" style="padding: 7px 14px; font-weight:bold;" href="<?= e(url('admin/sales/customers?q=' . urlencode($search) . '&export=csv')) ?>">
                 📥 Export CSV
             </a>
         </div>
@@ -98,7 +130,7 @@ admin_header('Customer Directory & Intelligence'); ?>
     <div class="panel" style="margin-bottom: 22px; background: #f8f9fa; border: 1px solid #ddd;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <h3 style="margin:0;">Order History for <?= e($inspectCustomer['customer_name']) ?> (<?= e($inspectCustomer['customer_email']) ?>)</h3>
-            <a class="button secondary" style="padding:4px 10px; font-size:12px;" href="<?= e(url('manage_portal_x92/customers.php')) ?>">Close Inspection</a>
+            <a class="button secondary" style="padding:4px 10px; font-size:12px;" href="<?= e(url('admin/sales/customers')) ?>">Close Inspection</a>
         </div>
 
         <div class="table-wrap">
@@ -109,7 +141,7 @@ admin_header('Customer Directory & Intelligence'); ?>
                         <th>Date</th>
                         <th>Total</th>
                         <th>Status</th>
-                        <th>Delivery Partner</th>
+                        <th>Tracking Number</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -124,9 +156,9 @@ admin_header('Customer Directory & Intelligence'); ?>
                                     <?= ucfirst(e($co['status'])) ?>
                                 </span>
                             </td>
-                            <td><?= e($co['courier_name'] ?: 'Unassigned') ?></td>
+                            <td><?= e($co['tracking_number'] ?: 'Unassigned') ?></td>
                             <td>
-                                <a class="button secondary" style="padding:3px 8px; font-size:12px;" href="<?= e(url('manage_portal_x92/orders.php?id=' . $co['id'])) ?>">Open Invoice</a>
+                                <a class="button secondary" style="padding:3px 8px; font-size:12px;" href="<?= e(url('admin/sales/orders?id=' . $co['id'])) ?>">Open Order</a>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -168,8 +200,8 @@ admin_header('Customer Directory & Intelligence'); ?>
                         <td><b><?= money($c['lifetime_spend']) ?></b></td>
                         <td><?= date('M d, Y', strtotime($c['last_order_date'])) ?></td>
                         <td style="display:flex; gap:6px;">
-                            <a class="button secondary" style="padding:4px 8px; font-size:12px;" href="<?= e(url('manage_portal_x92/customers.php?inspect_email=' . urlencode($c['customer_email']))) ?>">Inspect Orders</a>
-                            <a class="button secondary" style="padding:4px 8px; font-size:12px;" href="<?= e(url('manage_portal_x92/contacts.php')) ?>">Message</a>
+                            <a class="button secondary" style="padding:4px 8px; font-size:12px;" href="<?= e(url('admin/sales/customers?inspect_email=' . urlencode($c['customer_email']))) ?>">Inspect Orders</a>
+                            <a class="button secondary" style="padding:4px 8px; font-size:12px;" href="<?= e(url('admin/system/contacts')) ?>">Message</a>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -181,6 +213,24 @@ admin_header('Customer Directory & Intelligence'); ?>
             </tbody>
         </table>
     </div>
+
+    <!-- Pagination Controls -->
+    <?php if ($totalPages > 1): ?>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; padding-top:12px; border-top:1px solid #eee;">
+            <span class="small muted">
+                Page <b><?= $page ?></b> of <b><?= $totalPages ?></b>
+            </span>
+            <div style="display:flex; gap:6px;">
+                <?php if ($page > 1): ?>
+                    <a href="<?= e(url('admin/sales/customers?page=' . ($page - 1) . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:4px 10px; font-size:12px;">← Previous</a>
+                <?php endif; ?>
+                <?php if ($page < $totalPages): ?>
+                    <a href="<?= e(url('admin/sales/customers?page=' . ($page + 1) . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:4px 10px; font-size:12px;">Next →</a>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <p class="muted small" style="margin-top:15px;">Customer metrics exclude cancelled or returned orders.</p>
 </div>
 
