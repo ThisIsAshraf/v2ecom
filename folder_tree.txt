@@ -1,0 +1,197 @@
+v2ecom
+│
+├── api
+│   └── v1
+│       ├── auth
+│       │   └── login.php
+│       ├── courier
+│       │   └── sync.php
+│       ├── customers
+│       │   └── sync.php
+│       ├── orders
+│       │   └── track.php
+│       ├── products
+│       │   └── list.php
+│       └── middleware.php
+├── app
+│   ├── bootstrap.php
+│   ├── footer.php
+│   └── header.php
+├── assets
+│   └── style.css
+├── DBSchema
+│   └── SQLSchemaForDiverse.sql
+├── manage_portal_x92
+│   ├── auth
+│   │   ├── login.php
+│   │   └── logout.php
+│   ├── catalog
+│   │   ├── categories.php
+│   │   ├── products.php
+│   │   └── stock-logs.php
+│   ├── marketing
+│   │   ├── popup.php
+│   │   ├── slides.php
+│   │   ├── social.php
+│   │   └── testimonials.php
+│   ├── sales
+│   │   ├── coupons.php
+│   │   ├── customers.php
+│   │   ├── orders.php
+│   │   └── users.php
+│   ├── system
+│   │   ├── analytics.php
+│   │   ├── api_keys.php
+│   │   ├── contacts.php
+│   │   ├── maintenance.php
+│   │   ├── reports.php
+│   │   ├── security.php
+│   │   ├── settings.php
+│   │   └── theme.php
+│   ├── .htaccess
+│   ├── .htpasswd
+│   ├── dummySQL
+│   ├── index.php
+│   └── _init.php
+├── uploads
+│   ├── gal_1792321618_d00412.jpg
+│   ├── gal_1792437670_39ff3a.jpg
+│   ├── gal_1792437670_bc0090.jpg
+│   ├── gal_1792437670_de9ecc.jpg
+│   ├── gal_1792439778_8af2c5.jpeg
+│   ├── gal_1792439778_137162.jpeg
+│   ├── gal_1792439778_546986.jpeg
+│   ├── gal_1792694354_4885c0.jpg
+│   ├── hero_1792439182_64191d.jpg
+│   ├── hero_1792439216_c7e42b.jpg
+│   ├── hero_1792615284_77222f.jpg
+│   ├── popup_1792616658.jpg
+│   ├── popup_1792616715.jpg
+│   ├── popup_banner_1792615860_98226522.png
+│   ├── prod_1792320179_1738a0b8.jpg
+│   ├── prod_1792325002_f01d7b9e.png
+│   ├── prod_1792432822_34207bdd.jpg
+│   ├── prod_1792434414_a1b77334.jpg
+│   ├── prod_1792437670_c6bf399d.png
+│   ├── prod_1792439778_ac3168cf.jpg
+│   ├── prod_1792497287_5d57e7bd.png
+│   ├── social_1792324667_337ce9.png
+│   ├── social_1792439608_0be254.jpg
+│   └── social_1792506200_bf198c.png
+├── vendor
+│   ├── composer
+│   │   ├── autoload_classmap.php
+│   │   ├── autoload_files.php
+│   │   ├── autoload_namespaces.php
+│   │   ├── autoload_psr4.php
+│   │   ├── autoload_real.php
+│   │   ├── autoload_static.php
+│   │   ├── ClassLoader.php
+│   │   ├── installed.json
+│   │   ├── installed.php
+│   │   ├── InstalledVersions.php
+│   │   ├── LICENSE
+│   │   └── platform_check.php
+│   ├── phpmailer
+│   │   └── phpmailer
+│   │       ├── language
+│   │       │   ├── phpmailer.lang-af.php
+│   │       │   ├── phpmailer.lang-ar.php
+│   │       │   ├── phpmailer.lang-as.php
+│   │       │   ├── phpmailer.lang-az.php
+│   │       │   ├── phpmailer.lang-ba.php
+│   │       │   ├── phpmailer.lang-be.php
+│   │       │   ├── phpmailer.lang-bg.php
+│   │       │   ├── phpmailer.lang-bn.php
+│   │       │   ├── phpmailer.lang-ca.php
+│   │       │   ├── phpmailer.lang-cs.php
+│   │       │   ├── phpmailer.lang-da.php
+│   │       │   ├── phpmailer.lang-de.php
+│   │       │   ├── phpmailer.lang-el.php
+│   │       │   ├── phpmailer.lang-eo.php
+│   │       │   ├── phpmailer.lang-es.php
+│   │       │   ├── phpmailer.lang-et.php
+│   │       │   ├── phpmailer.lang-fa.php
+│   │       │   ├── phpmailer.lang-fi.php
+│   │       │   ├── phpmailer.lang-fo.php
+│   │       │   ├── phpmailer.lang-fr.php
+│   │       │   ├── phpmailer.lang-gl.php
+│   │       │   ├── phpmailer.lang-he.php
+│   │       │   ├── phpmailer.lang-hi.php
+│   │       │   ├── phpmailer.lang-hr.php
+│   │       │   ├── phpmailer.lang-hu.php
+│   │       │   ├── phpmailer.lang-hy.php
+│   │       │   ├── phpmailer.lang-id.php
+│   │       │   ├── phpmailer.lang-it.php
+│   │       │   ├── phpmailer.lang-ja.php
+│   │       │   ├── phpmailer.lang-ka.php
+│   │       │   ├── phpmailer.lang-ko.php
+│   │       │   ├── phpmailer.lang-ku.php
+│   │       │   ├── phpmailer.lang-lt.php
+│   │       │   ├── phpmailer.lang-lv.php
+│   │       │   ├── phpmailer.lang-mg.php
+│   │       │   ├── phpmailer.lang-mn.php
+│   │       │   ├── phpmailer.lang-ms.php
+│   │       │   ├── phpmailer.lang-nb.php
+│   │       │   ├── phpmailer.lang-nl.php
+│   │       │   ├── phpmailer.lang-pl.php
+│   │       │   ├── phpmailer.lang-pt.php
+│   │       │   ├── phpmailer.lang-pt_br.php
+│   │       │   ├── phpmailer.lang-ro.php
+│   │       │   ├── phpmailer.lang-ru.php
+│   │       │   ├── phpmailer.lang-si.php
+│   │       │   ├── phpmailer.lang-sk.php
+│   │       │   ├── phpmailer.lang-sl.php
+│   │       │   ├── phpmailer.lang-sr.php
+│   │       │   ├── phpmailer.lang-sr_latn.php
+│   │       │   ├── phpmailer.lang-sv.php
+│   │       │   ├── phpmailer.lang-tl.php
+│   │       │   ├── phpmailer.lang-tr.php
+│   │       │   ├── phpmailer.lang-uk.php
+│   │       │   ├── phpmailer.lang-ur.php
+│   │       │   ├── phpmailer.lang-vi.php
+│   │       │   ├── phpmailer.lang-zh.php
+│   │       │   └── phpmailer.lang-zh_cn.php
+│   │       ├── src
+│   │       │   ├── DSNConfigurator.php
+│   │       │   ├── Exception.php
+│   │       │   ├── OAuth.php
+│   │       │   ├── OAuthTokenProvider.php
+│   │       │   ├── PHPMailer.php
+│   │       │   ├── POP3.php
+│   │       │   └── SMTP.php
+│   │       ├── COMMITMENT
+│   │       ├── composer.json
+│   │       ├── get_oauth_token.php
+│   │       ├── LICENSE
+│   │       ├── README.md
+│   │       ├── SECURITY.md
+│   │       ├── SMTPUTF8.md
+│   │       └── VERSION
+│   └── autoload.php
+├── .env
+├── .env.example
+├── .gitignore
+├── .htaccess
+├── account.php
+├── api_production_guide.md
+├── api_usage_and_implementation_guide.md
+├── cart.php
+├── checkout.php
+├── composer.json
+├── composer.lock
+├── contact.php
+├── folder_tree.txt
+├── generate_tree.php
+├── index.php
+├── order-success.php
+├── passwordResetandDBClear.txt
+├── php.ini
+├── product.php
+├── README.md
+├── remove-coupon.php
+├── tech_stack_architecture.md
+├── track-order.php
+├── user_login.php
+├── user_logout.php
+└── user_register.php

@@ -1,0 +1,56 @@
+# 1. Protect .env and sensitive configuration files from public access
+<FilesMatch "^\.env|\.(log|ini|db|sql|bak)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 2. Ensure default index page loads properly
+DirectoryIndex index.php
+
+# 3. Prevent directory listing
+Options -Indexes
+
+# 4. Enable URL Rewrite Engine
+RewriteEngine On
+RewriteBase /v2ecom/
+
+# --- ADMIN PORTAL URL MASKING RULES ---
+
+# Admin Dashboard & Auth Routes
+RewriteRule ^admin/login/?$ manage_portal_x92/auth/login.php [L,QSA]
+RewriteRule ^admin/logout/?$ manage_portal_x92/auth/logout.php [L,QSA]
+RewriteRule ^admin/dashboard/?$ manage_portal_x92/index.php [L,QSA]
+
+# Catalog Management Routes
+RewriteRule ^admin/catalog/products/?$ manage_portal_x92/catalog/products.php [L,QSA]
+RewriteRule ^admin/catalog/categories/?$ manage_portal_x92/catalog/categories.php [L,QSA]
+RewriteRule ^admin/catalog/stock-logs/?$ manage_portal_x92/catalog/stock-logs.php [L,QSA]
+
+# Sales & Customer Management Routes
+RewriteRule ^admin/sales/orders/?$ manage_portal_x92/sales/orders.php [L,QSA]
+RewriteRule ^admin/sales/coupons/?$ manage_portal_x92/sales/coupons.php [L,QSA]
+RewriteRule ^admin/sales/customers/?$ manage_portal_x92/sales/customers.php [L,QSA]
+RewriteRule ^admin/sales/users/?$ manage_portal_x92/sales/users.php [L,QSA]
+RewriteRule ^admin/sales/cities$ manage_portal_x92/sales/cities.php [L,QSA]
+
+# Marketing & Content Routes
+RewriteRule ^admin/marketing/popup/?$ manage_portal_x92/marketing/popup.php [L,QSA]
+RewriteRule ^admin/marketing/slides/?$ manage_portal_x92/marketing/slides.php [L,QSA]
+RewriteRule ^admin/marketing/social/?$ manage_portal_x92/marketing/social.php [L,QSA]
+RewriteRule ^admin/marketing/testimonials/?$ manage_portal_x92/marketing/testimonials.php [L,QSA]
+
+# System, Security & Analytics Routes
+RewriteRule ^admin/system/analytics/?$ manage_portal_x92/system/analytics.php [L,QSA]
+RewriteRule ^admin/system/api-keys/?$ manage_portal_x92/system/api_keys.php [L,QSA]
+RewriteRule ^admin/system/security/?$ manage_portal_x92/system/security.php [L,QSA]
+RewriteRule ^admin/system/settings/?$ manage_portal_x92/system/settings.php [L,QSA]
+RewriteRule ^admin/system/theme/?$ manage_portal_x92/system/theme.php [L,QSA]
+RewriteRule ^admin/system/maintenance/?$ manage_portal_x92/system/maintenance.php [L,QSA]
+RewriteRule ^admin/system/contacts/?$ manage_portal_x92/system/contacts.php [L,QSA]
+RewriteRule ^admin/system/reports/?$ manage_portal_x92/system/reports.php [L,QSA]
+RewriteRule ^admin/system/env$ manage_portal_x92/system/env.php [L,QSA]
+
+# Dynamic Fallback Rule
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^admin/([^/]+)/([^/]+)/?$ manage_portal_x92/$1/$2.php [L,QSA]

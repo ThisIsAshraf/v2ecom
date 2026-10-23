@@ -1,0 +1,7 @@
+{
+  "name": "threadwear/store",
+  "description": "Core PHP MySQL clothing store",
+  "type": "project",
+  "require": {"php": ">=8.1", "phpmailer/phpmailer": "^6.9"},
+  "autoload": {"files": ["app/bootstrap.php"]}
+}

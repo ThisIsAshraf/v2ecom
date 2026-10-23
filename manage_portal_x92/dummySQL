@@ -1,0 +1,64 @@
+-- Safe transactional setup: ignore FK checks during batch insert
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- 1. Insert Categories
+INSERT INTO `categories` (`id`, `name`, `slug`, `created_at`) VALUES
+(1, 'Men\'s Casual Wear', 'mens-casual', NOW()),
+(2, 'Women\'s Ethnic Wear', 'womens-ethnic', NOW()),
+(3, 'Panjabi & Traditional', 'panjabi-traditional', NOW()),
+(4, 'Accessories & Outerwear', 'accessories', NOW())
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- 2. Insert Registered Users
+-- Note: Default password for sample users is: Password123
+INSERT INTO `users` (`id`, `name`, `email`, `password_hash`, `phone`, `address`, `city`, `status`, `created_at`, `updated_at`) VALUES
+(1, 'Tanvir Ahmed', 'tanvir.ahmed@example.com', '$2y$10$e84S3S7uN2lI0v9eW.oX0eTfL5/J9N6eM4vQ1sT3uV5wX7yZ9aB2c', '01711223344', 'House 45, Road 11, Block D, Banani', 'Dhaka', 'active', NOW(), NOW()),
+(2, 'Nusrat Jahan', 'nusrat.jahan@example.com', '$2y$10$e84S3S7uN2lI0v9eW.oX0eTfL5/J9N6eM4vQ1sT3uV5wX7yZ9aB2c', '01811998877', 'Flat 4B, Green Road', 'Dhaka', 'active', NOW(), NOW()),
+(3, 'Rahim Chowdhury', 'rahim.c@example.com', '$2y$10$e84S3S7uN2lI0v9eW.oX0eTfL5/J9N6eM4vQ1sT3uV5wX7yZ9aB2c', '01911445566', 'GEC Circle, Nasirabad', 'Chittagong', 'active', NOW(), NOW())
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- 3. Insert Products
+INSERT INTO `products` (`id`, `category_id`, `name`, `slug`, `sku`, `description`, `price`, `compare_price`, `image_url`, `stock`, `active`, `created_at`, `updated_at`) VALUES
+(1, 1, 'Slim Fit Oxford Cotton Shirt - Navy', 'oxford-cotton-shirt-navy', 'SHIRT-NAVY-01', 'Premium 100% breathable cotton shirt suitable for casual and semi-formal wear.', 1450.00, 1850.00, 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=800', 25, 1, NOW(), NOW()),
+(2, 1, 'Vintage Wash Denim Jeans', 'vintage-wash-denim-jeans', 'JEANS-DENIM-02', 'Durable stretch denim trousers with a classic 5-pocket cut.', 1890.00, 2200.00, 'https://images.unsplash.com/photo-1542272604-780c36856d62?w=800', 18, 1, NOW(), NOW()),
+(3, 2, 'Floral Print Lawn Kameez Set', 'floral-print-lawn-kameez-set', 'KAMEEZ-FLORAL-03', 'Lightweight 3-piece printed lawn set with organza dupatta.', 2450.00, 2950.00, 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=800', 12, 1, NOW(), NOW()),
+(4, 3, 'Royal Kabli Panjabi - Maroon', 'royal-kabli-panjabi-maroon', 'PANJABI-MAROON-04', 'Traditional cotton viscose panjabi set with fine embroidery work.', 2800.00, 3200.00, 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=800', 15, 1, NOW(), NOW()),
+(5, 4, 'Handcrafted Leather Belt - Tan', 'handcrafted-leather-belt-tan', 'BELT-TAN-05', 'Genuine full-grain leather belt with antique brass buckle.', 850.00, 1100.00, 'https://images.unsplash.com/photo-1624222247344-550fb60583dc?w=800', 40, 1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- 4. Insert Product Gallery Images (Linked to product_id)
+INSERT INTO `product_images` (`id`, `product_id`, `image_url`, `created_at`) VALUES
+(1, 1, 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=800', NOW()),
+(2, 1, 'https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=800', NOW()),
+(3, 2, 'https://images.unsplash.com/photo-1542272604-780c36856d62?w=800', NOW()),
+(4, 2, 'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=800', NOW()),
+(5, 3, 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=800', NOW()),
+(6, 4, 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=800', NOW()),
+(7, 5, 'https://images.unsplash.com/photo-1624222247344-550fb60583dc?w=800', NOW())
+ON DUPLICATE KEY UPDATE `image_url` = VALUES(`image_url`);
+
+-- 5. Insert Sample Orders (Linked to user_id)
+INSERT INTO `orders` (`id`, `user_id`, `order_number`, `customer_name`, `customer_email`, `customer_phone`, `address`, `city`, `notes`, `payment_method`, `status`, `tracking_number`, `subtotal`, `discount_amount`, `shipping_amount`, `total`, `coupon_code`, `created_at`, `updated_at`) VALUES
+(1, 1, 'ORD-202610-001', 'Tanvir Ahmed', 'tanvir.ahmed@example.com', '01711223344', 'House 45, Road 11, Block D, Banani', 'Dhaka', 'Please call before delivery.', 'COD', 'confirmed', 'TRK-983214', 3340.00, 100.00, 60.00, 3300.00, 'WELCOME100', NOW(), NOW()),
+(2, 2, 'ORD-202610-002', 'Nusrat Jahan', 'nusrat.jahan@example.com', '01811998877', 'Flat 4B, Green Road', 'Dhaka', 'Leave at front gate if not answered.', 'COD', 'pending', NULL, 2450.00, 0.00, 60.00, 2510.00, NULL, NOW(), NOW()),
+(3, 3, 'ORD-202610-003', 'Rahim Chowdhury', 'rahim.c@example.com', '01911445566', 'GEC Circle, Nasirabad', 'Chittagong', NULL, 'COD', 'processing', 'TRK-445129', 2800.00, 0.00, 120.00, 2920.00, NULL, NOW(), NOW())
+ON DUPLICATE KEY UPDATE `order_number` = VALUES(`order_number`);
+
+-- 6. Insert Order Items (Linked to order_id & product_id)
+INSERT INTO `order_items` (`id`, `order_id`, `product_id`, `product_name`, `sku`, `quantity`, `unit_price`, `line_total`) VALUES
+(1, 1, 1, 'Slim Fit Oxford Cotton Shirt - Navy', 'SHIRT-NAVY-01', 1, 1450.00, 1450.00),
+(2, 1, 2, 'Vintage Wash Denim Jeans', 'JEANS-DENIM-02', 1, 1890.00, 1890.00),
+(3, 2, 3, 'Floral Print Lawn Kameez Set', 'KAMEEZ-FLORAL-03', 1, 2450.00, 2450.00),
+(4, 3, 4, 'Royal Kabli Panjabi - Maroon', 'PANJABI-MAROON-04', 1, 2800.00, 2800.00)
+ON DUPLICATE KEY UPDATE `product_name` = VALUES(`product_name`);
+
+-- Synchronize Auto Increment pointers for clean future insertions
+ALTER TABLE `categories` AUTO_INCREMENT = 10;
+ALTER TABLE `users` AUTO_INCREMENT = 10;
+ALTER TABLE `products` AUTO_INCREMENT = 10;
+ALTER TABLE `product_images` AUTO_INCREMENT = 10;
+ALTER TABLE `orders` AUTO_INCREMENT = 10;
+ALTER TABLE `order_items` AUTO_INCREMENT = 10;
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;

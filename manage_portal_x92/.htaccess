@@ -1,0 +1,4 @@
+AuthType Basic
+AuthName "Restricted Management Area"
+AuthUserFile "C:/xampp/htdocs/diversebd/manage_portal_x92/.htpasswd"
+Require valid-user
