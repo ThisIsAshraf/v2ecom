@@ -713,22 +713,31 @@ if (!function_exists('require_permission')) {
 if (!function_exists('sync_htpasswd_user')) {
     function sync_htpasswd_user(string $username, string $plainPassword): bool
     {
-        $htpasswdPath = __DIR__ . '/../manage_portal_x92/.htpasswd';
+        $htpasswdPath = dirname(__DIR__) . '/manage_portal_x92/.htpasswd';
+        $username = trim($username);
+
         if (!file_exists($htpasswdPath)) {
-            return false;
+            @touch($htpasswdPath);
         }
 
-        $lines = file($htpasswdPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        $updatedLines = [];
-        $userFound = false;
-
-        // Generate SHA1 hash in Apache htpasswd format: {SHA}base64_encode(sha1(pass, raw))
+        // Generate Apache SHA1 password hash
         $hash = '{SHA}' . base64_encode(sha1($plainPassword, true));
         $newLine = $username . ':' . $hash;
 
+        $rawContent = file_exists($htpasswdPath) ? file_get_contents($htpasswdPath) : '';
+        // Standardize all Windows (\r\n) newlines to Unix (\n)
+        $rawContent = str_replace("\r\n", "\n", $rawContent);
+        $lines = array_filter(array_map('trim', explode("\n", $rawContent)), fn($l) => $l !== '');
+
+        $updatedLines = [];
+        $userFound = false;
+
         foreach ($lines as $line) {
-            $parts = explode(':', $line, 2);
-            if (trim($parts[0]) === $username) {
+            if (!str_contains($line, ':')) continue;
+            [$existingUser,] = explode(':', $line, 2);
+            $existingUser = trim($existingUser);
+
+            if (strcasecmp($existingUser, $username) === 0) {
                 $updatedLines[] = $newLine;
                 $userFound = true;
             } else {
