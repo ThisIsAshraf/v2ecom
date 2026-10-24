@@ -1,4 +1,11 @@
 <?php require_once __DIR__ . '/_init.php';
+admin_required();
+
+// Prevent direct URL exposure: redirect manage_portal_x92/index.php to /admin
+$requestUri = (string)($_SERVER['REQUEST_URI'] ?? '');
+if (str_contains($requestUri, 'manage_portal_x92')) {
+    redirect('admin');
+}
 
 // KPI Metrics
 $stats = [];
@@ -49,8 +56,8 @@ admin_header('Dashboard'); ?>
         <span>Customer Inbox</span>
         <strong style="<?= $stats['unread_messages'] > 0 ? 'color: #3498db;' : '' ?>"><?= $stats['unread_messages'] ?> Unread</strong>
         <p style="margin-top: 10px;">
-            <a class="button" href="<?= e(url('manage_portal_x92/contacts.php')) ?>">Open Messages</a>
-            <a class="button secondary" href="<?= e(url('manage_portal_x92/products.php')) ?>">Add Product</a>
+            <a class="button" href="<?= e(url('admin/system/contacts')) ?>">Open Messages</a>
+            <a class="button secondary" href="<?= e(url('admin/catalog/products')) ?>">Add Product</a>
         </p>
     </div>
 </div>
@@ -62,7 +69,7 @@ admin_header('Dashboard'); ?>
     <div class="panel">
         <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <h2>Recent Orders</h2>
-            <a href="<?= e(url('manage_portal_x92/orders.php')) ?>">View all orders →</a>
+            <a href="<?= e(url('admin/sales/orders')) ?>">View all orders →</a>
         </div>
         <div class="table-wrap">
             <table>
@@ -79,7 +86,7 @@ admin_header('Dashboard'); ?>
                     <?php foreach ($recentOrders as $o): ?>
                         <tr>
                             <td>
-                                <a href="<?= e(url('manage_portal_x92/orders.php?id=' . $o['id'])) ?>">
+                                <a href="<?= e(url('admin/sales/orders?id=' . $o['id'])) ?>">
                                     <b><?= e($o['order_number']) ?></b>
                                 </a>
                             </td>
@@ -107,7 +114,7 @@ admin_header('Dashboard'); ?>
     <div class="panel">
         <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <h2 style="color: #c0392b;">Low Stock Alert</h2>
-            <a href="<?= e(url('manage_portal_x92/products.php')) ?>">Manage</a>
+            <a href="<?= e(url('admin/catalog/products')) ?>">Manage</a>
         </div>
         <?php if ($lowStockProducts): ?>
             <div class="table-wrap">
@@ -130,7 +137,7 @@ admin_header('Dashboard'); ?>
                                     <span style="color: #e74c3c; font-weight: bold;"><?= (int)$p['stock'] ?> left</span>
                                 </td>
                                 <td>
-                                    <a class="button secondary" style="padding: 4px 8px; font-size: 11px;" href="<?= e(url('manage_portal_x92/products.php?edit=' . $p['id'])) ?>">Restock</a>
+                                    <a class="button secondary" style="padding: 4px 8px; font-size: 11px;" href="<?= e(url('admin/catalog/products?edit=' . $p['id'])) ?>">Restock</a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

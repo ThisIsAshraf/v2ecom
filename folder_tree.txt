@@ -1,0 +1,452 @@
+v2ecom
+│
+├── .git
+│   ├── hooks
+│   │   ├── applypatch-msg.sample
+│   │   ├── commit-msg.sample
+│   │   ├── fsmonitor-watchman.sample
+│   │   ├── post-update.sample
+│   │   ├── pre-applypatch.sample
+│   │   ├── pre-commit.sample
+│   │   ├── pre-merge-commit.sample
+│   │   ├── pre-push.sample
+│   │   ├── pre-rebase.sample
+│   │   ├── pre-receive.sample
+│   │   ├── prepare-commit-msg.sample
+│   │   ├── push-to-checkout.sample
+│   │   ├── sendemail-validate.sample
+│   │   └── update.sample
+│   ├── info
+│   │   └── exclude
+│   ├── logs
+│   │   ├── refs
+│   │   │   ├── heads
+│   │   │   │   └── main
+│   │   │   └── remotes
+│   │   │       └── origin
+│   │   │           └── main
+│   │   └── HEAD
+│   ├── objects
+│   │   ├── 00
+│   │   │   └── 90ba5cb012d5ee6ff401b4b41ab582c9e7272b
+│   │   ├── 0a
+│   │   │   ├── 7a0173235e8c0bdb0b11a7aa3ab21d08795539
+│   │   │   └── 730492b67e3ffeb616e9007336a40da5a2ba75
+│   │   ├── 0f
+│   │   │   └── 29554789485435133acc4f1affdedeb4d79767
+│   │   ├── 01
+│   │   │   └── f3c590f3aec675115d90220938adcdfa9f62e9
+│   │   ├── 1b
+│   │   │   └── 7d3ccc67511d10b7154845b2bcd4c564d5f2e2
+│   │   ├── 1d
+│   │   │   └── b844eb1f52435ae157746edda93cc20b12c1d6
+│   │   ├── 2b
+│   │   │   └── 4b407c4fd3bb53c87c72f4c74fe27c49b12342
+│   │   ├── 2c
+│   │   │   └── 56960ce3ce00129600351f7b40f2cfadd4bc53
+│   │   ├── 3a
+│   │   │   └── c215d9c4178e9957a01936e041da42a79b5d87
+│   │   ├── 3f
+│   │   │   └── 977232e68885dbae0402ecb7eb7a73651e0508
+│   │   ├── 4d
+│   │   │   ├── 88971bbc8bb34bc5fa19ef3ae072146b24ebd0
+│   │   │   └── acd3b72c16ab4b0d16ead56e529ffa9a4dea5e
+│   │   ├── 4f
+│   │   │   └── 123231015254712f3088bf3c0fba708be1d0d3
+│   │   ├── 05
+│   │   │   └── e998dfa929a21cf8a294f914e62178faa3a273
+│   │   ├── 5c
+│   │   │   ├── 6d5c13b884a80c92ce0047a697034b585281c2
+│   │   │   └── 12b3684276057b60b3832839bbea7f2807228e
+│   │   ├── 5e
+│   │   │   └── b35d67cdda2f7a65d8e435171afeeff2227685
+│   │   ├── 5f
+│   │   │   ├── eb824051375452a878613938db3dc5e8d87cee
+│   │   │   └── f190f53d1d6431e6db178950555a7f5ca2d866
+│   │   ├── 6a
+│   │   │   ├── dafa40cbab10cc9fcd6d238543c9753377f442
+│   │   │   └── ef4b32f160cd788b69bb35510713d5197dc6e3
+│   │   ├── 6b
+│   │   │   └── e19adc258fa9eaf7764e635022d09737e31304
+│   │   ├── 07
+│   │   │   └── 2b6272b26197a3426cc286551e2525c8d8bf6c
+│   │   ├── 7b
+│   │   │   └── 039df646a56ab4bc6f8b415e5dd103d23f4603
+│   │   ├── 7e
+│   │   │   ├── 7b78b06bbd4e1a4e48270f8c2bdde8b9b43805
+│   │   │   ├── 57fb297e81cdfd1dcf95fde8b574df5ce770a1
+│   │   │   └── 865bd58915b27afa838638d46060434fe86c13
+│   │   ├── 08
+│   │   │   ├── 8628e64ef826933f01ffff399fa7638b214087
+│   │   │   └── d47c0bfedd79754c034ec9a681b06377b49051
+│   │   ├── 8a
+│   │   │   └── 7c89a4e397343498d22bc44f0f39163b926cb7
+│   │   ├── 8b
+│   │   │   └── 17672a5eee6ac718022f1575040f2a56f2c713
+│   │   ├── 8e
+│   │   │   └── c7d6f0b826831f29d58dee22c1953e95906f68
+│   │   ├── 09
+│   │   │   └── d7cd920664e3d746ec7a1169d6f03341209542
+│   │   ├── 9b
+│   │   │   └── 85bfb7a350371373da7ab14fb5f6139da4ab46
+│   │   ├── 9f
+│   │   │   ├── 7b99ba2fae57b15fec1e01a541926d4c05ed6d
+│   │   │   └── a0cf08a1e5e03f57e2d974aede91ea47b4683e
+│   │   ├── 11
+│   │   │   └── 9a064b74f7bb1c794bd39596b1fb4a76ea7a73
+│   │   ├── 12
+│   │   │   └── 8e34cd627fe8f177775b4b4cb1cba7fff362d2
+│   │   ├── 19
+│   │   │   ├── 65060f0ac062eab3efa4650c35f551c61cec25
+│   │   │   └── bcb6e050776f2807d0d692a4cdb8ed18912a62
+│   │   ├── 20
+│   │   │   ├── 8416fb823b1579a7db0c21a1a54bc1ba66856d
+│   │   │   └── b5d5a26df75ca0526f64a65fc29d65d63cb879
+│   │   ├── 23
+│   │   │   └── 02d4f464edf094b3482e1bc48eb65c67f9cb32
+│   │   ├── 24
+│   │   │   └── 1c79aaa77716cd906e7591d1b8ad83b651f0df
+│   │   ├── 25
+│   │   │   ├── 9978cf80d48e8d0269776e84e0015a2105e460
+│   │   │   └── 27698395fce964fb14c7927473a2a3a2784717
+│   │   ├── 27
+│   │   │   └── 3023d62a9c5cdfce3491212195d79364e79c2b
+│   │   ├── 28
+│   │   │   └── d160b1708610a30e6f2c518e675489d7a3ad16
+│   │   ├── 30
+│   │   │   ├── b85dca63ad9a83ded0be47ee4dfd530d92ca33
+│   │   │   └── f2fe60c15283baa51c46e6593f3c4bdb549973
+│   │   ├── 31
+│   │   │   ├── aedc3dcf12088951ba79829ed8c0183630a68d
+│   │   │   └── d4077392a49307645d48f40d617dcb09e55271
+│   │   ├── 32
+│   │   │   └── c9701b5d80815bceecec9484f945de838a8e9a
+│   │   ├── 34
+│   │   │   ├── 7ae62df7513c2cc2fdcc7b43eda6e0a3872e48
+│   │   │   └── b7c184c342f813a83f5476367502de43b58241
+│   │   ├── 36
+│   │   │   └── abbc0bc46770336bce9c570b640c6a88e6199f
+│   │   ├── 41
+│   │   │   └── e18c8d9872c766bc8a204e341b9907445cfeab
+│   │   ├── 45
+│   │   │   ├── b577b58daff7b271dd26cba3c399638be3b5db
+│   │   │   └── bcbfeaa4416ef726efb32c68b09873c5cc668e
+│   │   ├── 48
+│   │   │   └── 37ec3aed33addebf4128e6b0628b38f1b52f86
+│   │   ├── 49
+│   │   │   └── 2b40c1148b414400c25ecc4b87fcd5e837cae9
+│   │   ├── 56
+│   │   │   ├── 24c5c54d5def118835284d9f9856df8511adad
+│   │   │   └── 18679d43a8633f28cf78fbf2b9d11cd0ab6a89
+│   │   ├── 60
+│   │   │   ├── 05882f0d3e5e4805e7199968c5c4492b97c226
+│   │   │   └── e36148b6a7565a44921b6e754d899933ebeb2d
+│   │   ├── 64
+│   │   │   └── 4dab028bd866a620b34913791b1573df186c33
+│   │   ├── 66
+│   │   │   └── 8d2e63a7b737ccb5e4e474820b5ee4e434c369
+│   │   ├── 68
+│   │   │   └── 6c17cd1cbb960ed1c4b858b172c31faecf7161
+│   │   ├── 69
+│   │   │   └── ca591e78c33be4697e7f9b75efe33fb4f796cb
+│   │   ├── 72
+│   │   │   └── 8f1239cfad43b250364ba8a8341501c34af440
+│   │   ├── 73
+│   │   │   └── 9689be8dcab5262db628ca21cb096fc1c81e24
+│   │   ├── 76
+│   │   │   └── 940cac228ee40442901e30a0345877ace9bf4a
+│   │   ├── 78
+│   │   │   └── 1a6271c049197531340df90f27a71e07b01e4c
+│   │   ├── 79
+│   │   │   └── d6fc5a0c9d3d30f6334d6a9fa9b3da87f1d2ec
+│   │   ├── 80
+│   │   │   └── 9bf833436edb0ff30e89e25113c213ab843490
+│   │   ├── 81
+│   │   │   └── 8733c64dc9b79eb6ef6631109a44f80c1d7a3a
+│   │   ├── 84
+│   │   │   └── 86d9d7a5627f715e2086a4319f3549860bbd6d
+│   │   ├── 86
+│   │   │   └── 534df7ceca9236d23f00ad526a010fa001b16c
+│   │   ├── 87
+│   │   │   └── f96fd997a979140f3c14b4a6a42f7dd6c04c36
+│   │   ├── 89
+│   │   │   └── dbf66316388563fed464dc76b344755af8e2a4
+│   │   ├── 90
+│   │   │   └── f3c19b9a5f6851270baff60bb424a84931c6df
+│   │   ├── 92
+│   │   │   └── f3da04b76f0bc1df0d6a73abdd5c70f8a4eaf5
+│   │   ├── 93
+│   │   │   └── 6bd86271cefe0801ae5098bffbd92b7e676cc9
+│   │   ├── 95
+│   │   │   ├── 8f7cfba0332456d10d73306bf3dd493d85e482
+│   │   │   └── e046033af985b3c3be136791286432d37ae974
+│   │   ├── a0
+│   │   │   └── baa6353afd16be8d69b2a3dc3fbd3bd4ea9f5c
+│   │   ├── a1
+│   │   │   └── 46da4451c8d05ad4c4d7288504ec2212b1a845
+│   │   ├── a2
+│   │   │   └── d105d02605014d612afce153ac443935f15132
+│   │   ├── a3
+│   │   │   ├── 4fc4a3ac52ed14341ce2a267bf68457dbb8cbb
+│   │   │   └── e9ee7d422108c9ec92bcc0e6e11273ac346455
+│   │   ├── a7
+│   │   │   └── 1ed0859fd163687b316d1acb3b249c2bf1a853
+│   │   ├── a9
+│   │   │   └── fe3fa4b8a10c9a68bbfaf80b26bc82da79df20
+│   │   ├── aa
+│   │   │   └── 96722b5d1279220df68b85437cf44c1b60541b
+│   │   ├── b0
+│   │   │   └── 57ab669bf2348d20b627b6a207d65f3ca6514b
+│   │   ├── b7
+│   │   │   └── 0be31a90ef3bdfc331f48264424efe450f07c9
+│   │   ├── b8
+│   │   │   └── cd5ba24f5d38268216753a98d6b87dce411324
+│   │   ├── b9
+│   │   │   └── 197b6db13224174de7b9d66faf5521beb7f06c
+│   │   ├── ba
+│   │   │   └── 17864f0c22450c73f9287dce2fdd6b4f2ec77f
+│   │   ├── bc
+│   │   │   ├── d8b643fd34a38281e6f0419a112711d59e5755
+│   │   │   └── f3390ddd7b01dfa93c095d21a79340e93f534e
+│   │   ├── be
+│   │   │   └── f357717922e17073d99d661c04e0273e3a479f
+│   │   ├── c0
+│   │   │   └── 7c57141b60047e1f66847e9de1bdb2d49ab5df
+│   │   ├── c1
+│   │   │   └── 2ca693ca7874e014bfe665e665afc7429a8d55
+│   │   ├── c3
+│   │   │   └── 113f6479e461306bd2f6d78d490e24bb6253e5
+│   │   ├── c5
+│   │   │   └── 1ebcd97794dba1ae585141383727c53d591487
+│   │   ├── c9
+│   │   │   └── 1d16c57a7500a762b33c274fb2125f8be43e89
+│   │   ├── cc
+│   │   │   └── a857dfa39c66fa82d1f1fd3c6b049204def17b
+│   │   ├── ce
+│   │   │   ├── 0836f6b54a2a83722812307706f1f3f4497dc0
+│   │   │   └── f1b197ea3eb4061d4c77a02f89c780a092b4ee
+│   │   ├── cf
+│   │   │   └── 3bc3270873291bc9435b2ca21d719498cc5d1f
+│   │   ├── d3
+│   │   │   ├── 3708f9a3708de698b1ab8f30ce278be85a058f
+│   │   │   └── a9f1ca60d9ff9bc87035e0e99c0e136e627414
+│   │   ├── da
+│   │   │   └── dd8696aff23d2b609a86a114c50d82e69e6974
+│   │   ├── db
+│   │   │   └── f80be6c832e7f55f94b44857b88294ab705f5b
+│   │   ├── dc
+│   │   │   └── 242546c61aa24f99deca59cf940dd63ba33438
+│   │   ├── dd
+│   │   │   └── 45ac45352fed6ee0b654c010cec03f89067173
+│   │   ├── df
+│   │   │   └── 8a6154238f1d817bb308530f066214061171cd
+│   │   ├── e3
+│   │   │   ├── 3dae6d7a245dcf99c3d343564a975557d00ec8
+│   │   │   └── 459c66aed3868012197db9c80669bbc1306d27
+│   │   ├── ea
+│   │   │   └── 3d6560a32ab095451fde33e1b9f412f6d4afab
+│   │   ├── ec
+│   │   │   └── 62e8e0aadda4eae5512c1bad69e5a96366b23e
+│   │   ├── ed
+│   │   │   └── 4d04a250e60c184c7e1279b03222603bd59320
+│   │   ├── ef
+│   │   │   └── b032af12e0dcb479bd12ee674989a05597ce32
+│   │   ├── f1
+│   │   │   ├── 6e8eec473262b7fb69ccc6116c188843cfa5d6
+│   │   │   └── 7edad253ba3e0e62fbfe8478b5d0af98fd7c6e
+│   │   ├── f9
+│   │   │   ├── 446b528cd2fb059c3bc3c1aff6b3d7f0792f7c
+│   │   │   └── 9807ec74963de6b2c114011fa710ad86c45f18
+│   │   ├── fb
+│   │   │   └── 17f364d35e96f7068a3b03682e9a6c9bd92170
+│   │   ├── fd
+│   │   │   ├── 0be4d86ac604ac9223898495e7d8c107f81aa1
+│   │   │   └── b692761776c21d6a7109a193133ff479f34782
+│   │   ├── info
+│   │   └── pack
+│   ├── refs
+│   │   ├── heads
+│   │   │   └── main
+│   │   ├── remotes
+│   │   │   └── origin
+│   │   │       └── main
+│   │   └── tags
+│   ├── COMMIT_EDITMSG
+│   ├── config
+│   ├── description
+│   ├── HEAD
+│   └── index
+├── api
+│   └── v1
+│       ├── auth
+│       │   └── login.php
+│       ├── courier
+│       │   └── sync.php
+│       ├── customers
+│       │   └── sync.php
+│       ├── orders
+│       │   └── track.php
+│       ├── products
+│       │   └── list.php
+│       └── middleware.php
+├── app
+│   ├── bootstrap.php
+│   ├── bootstrap copy.php
+│   ├── footer.php
+│   └── header.php
+├── assets
+│   └── style.css
+├── DBSchema
+│   └── v2Ecom.sql
+├── manage_portal_x92
+│   ├── auth
+│   │   ├── login.php
+│   │   └── logout.php
+│   ├── catalog
+│   │   ├── categories.php
+│   │   ├── products.php
+│   │   └── stock-logs.php
+│   ├── marketing
+│   │   ├── popup.php
+│   │   ├── slides.php
+│   │   ├── social.php
+│   │   └── testimonials.php
+│   ├── sales
+│   │   ├── cities.php
+│   │   ├── coupons.php
+│   │   ├── customers.php
+│   │   ├── orders.php
+│   │   └── users.php
+│   ├── system
+│   │   ├── analytics.php
+│   │   ├── api_keys.php
+│   │   ├── contacts.php
+│   │   ├── env.php
+│   │   ├── maintenance.php
+│   │   ├── reports.php
+│   │   ├── security.php
+│   │   ├── settings.php
+│   │   └── theme.php
+│   ├── .htaccess
+│   ├── .htpasswd
+│   ├── dummySQL
+│   ├── index.php
+│   └── _init.php
+├── uploads
+├── vendor
+│   ├── composer
+│   │   ├── autoload_classmap.php
+│   │   ├── autoload_files.php
+│   │   ├── autoload_namespaces.php
+│   │   ├── autoload_psr4.php
+│   │   ├── autoload_real.php
+│   │   ├── autoload_static.php
+│   │   ├── ClassLoader.php
+│   │   ├── installed.json
+│   │   ├── installed.php
+│   │   ├── InstalledVersions.php
+│   │   ├── LICENSE
+│   │   └── platform_check.php
+│   ├── phpmailer
+│   │   └── phpmailer
+│   │       ├── language
+│   │       │   ├── phpmailer.lang-af.php
+│   │       │   ├── phpmailer.lang-ar.php
+│   │       │   ├── phpmailer.lang-as.php
+│   │       │   ├── phpmailer.lang-az.php
+│   │       │   ├── phpmailer.lang-ba.php
+│   │       │   ├── phpmailer.lang-be.php
+│   │       │   ├── phpmailer.lang-bg.php
+│   │       │   ├── phpmailer.lang-bn.php
+│   │       │   ├── phpmailer.lang-ca.php
+│   │       │   ├── phpmailer.lang-cs.php
+│   │       │   ├── phpmailer.lang-da.php
+│   │       │   ├── phpmailer.lang-de.php
+│   │       │   ├── phpmailer.lang-el.php
+│   │       │   ├── phpmailer.lang-eo.php
+│   │       │   ├── phpmailer.lang-es.php
+│   │       │   ├── phpmailer.lang-et.php
+│   │       │   ├── phpmailer.lang-fa.php
+│   │       │   ├── phpmailer.lang-fi.php
+│   │       │   ├── phpmailer.lang-fo.php
+│   │       │   ├── phpmailer.lang-fr.php
+│   │       │   ├── phpmailer.lang-gl.php
+│   │       │   ├── phpmailer.lang-he.php
+│   │       │   ├── phpmailer.lang-hi.php
+│   │       │   ├── phpmailer.lang-hr.php
+│   │       │   ├── phpmailer.lang-hu.php
+│   │       │   ├── phpmailer.lang-hy.php
+│   │       │   ├── phpmailer.lang-id.php
+│   │       │   ├── phpmailer.lang-it.php
+│   │       │   ├── phpmailer.lang-ja.php
+│   │       │   ├── phpmailer.lang-ka.php
+│   │       │   ├── phpmailer.lang-ko.php
+│   │       │   ├── phpmailer.lang-ku.php
+│   │       │   ├── phpmailer.lang-lt.php
+│   │       │   ├── phpmailer.lang-lv.php
+│   │       │   ├── phpmailer.lang-mg.php
+│   │       │   ├── phpmailer.lang-mn.php
+│   │       │   ├── phpmailer.lang-ms.php
+│   │       │   ├── phpmailer.lang-nb.php
+│   │       │   ├── phpmailer.lang-nl.php
+│   │       │   ├── phpmailer.lang-pl.php
+│   │       │   ├── phpmailer.lang-pt.php
+│   │       │   ├── phpmailer.lang-pt_br.php
+│   │       │   ├── phpmailer.lang-ro.php
+│   │       │   ├── phpmailer.lang-ru.php
+│   │       │   ├── phpmailer.lang-si.php
+│   │       │   ├── phpmailer.lang-sk.php
+│   │       │   ├── phpmailer.lang-sl.php
+│   │       │   ├── phpmailer.lang-sr.php
+│   │       │   ├── phpmailer.lang-sr_latn.php
+│   │       │   ├── phpmailer.lang-sv.php
+│   │       │   ├── phpmailer.lang-tl.php
+│   │       │   ├── phpmailer.lang-tr.php
+│   │       │   ├── phpmailer.lang-uk.php
+│   │       │   ├── phpmailer.lang-ur.php
+│   │       │   ├── phpmailer.lang-vi.php
+│   │       │   ├── phpmailer.lang-zh.php
+│   │       │   └── phpmailer.lang-zh_cn.php
+│   │       ├── src
+│   │       │   ├── DSNConfigurator.php
+│   │       │   ├── Exception.php
+│   │       │   ├── OAuth.php
+│   │       │   ├── OAuthTokenProvider.php
+│   │       │   ├── PHPMailer.php
+│   │       │   ├── POP3.php
+│   │       │   └── SMTP.php
+│   │       ├── COMMITMENT
+│   │       ├── composer.json
+│   │       ├── get_oauth_token.php
+│   │       ├── LICENSE
+│   │       ├── README.md
+│   │       ├── SECURITY.md
+│   │       ├── SMTPUTF8.md
+│   │       └── VERSION
+│   └── autoload.php
+├── .env
+├── .env.backup
+├── .env.example
+├── .gitignore
+├── .htaccess
+├── account.php
+├── api_production_guide.md
+├── api_usage_and_implementation_guide.md
+├── cart.php
+├── checkout.php
+├── composer.json
+├── composer.lock
+├── contact.php
+├── generate_tree.php
+├── index.php
+├── order-success.php
+├── passwordResetandDBClear.txt
+├── php.ini
+├── product.php
+├── README.md
+├── remove-coupon.php
+├── tech_stack_architecture.md
+├── track-order.php
+├── user_login.php
+├── user_logout.php
+└── user_register.php

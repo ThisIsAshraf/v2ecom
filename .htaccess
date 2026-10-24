@@ -16,6 +16,10 @@ RewriteBase /v2ecom/
 
 # --- ADMIN PORTAL URL MASKING RULES ---
 
+# Route clean admin base to the portal index
+RewriteRule ^admin/?$ manage_portal_x92/index.php [L,QSA]
+RewriteRule ^admin/dashboard/?$ manage_portal_x92/index.php [L,QSA]
+
 # Admin Dashboard & Auth Routes
 RewriteRule ^admin/login/?$ manage_portal_x92/auth/login.php [L,QSA]
 RewriteRule ^admin/logout/?$ manage_portal_x92/auth/logout.php [L,QSA]
