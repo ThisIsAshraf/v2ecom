@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-// 1. Load Composer Autoloader at startup so PHPMailer & vendor libraries are globally indexed
+// 1. Load Composer Autoloader at startup so PHPMailer, Dompdf & vendor libraries are globally indexed
 $autoload = dirname(__DIR__) . '/vendor/autoload.php';
 if (is_file($autoload)) {
     require_once $autoload;
@@ -11,6 +11,8 @@ if (is_file($autoload)) {
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 use PHPMailer\PHPMailer\Exception;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 
 // Tiny .env reader, no extra dependency required.
 $envFile = dirname(__DIR__) . '/.env';
@@ -113,6 +115,14 @@ if (!function_exists('money')) {
     {
         $symbol = site_setting('currency_symbol', envv('CURRENCY', '৳'));
         return e($symbol) . number_format((float)$amount, 2);
+    }
+}
+
+// Dedicated ASCII/Clean currency formatter for PDF rendering (Prevents '?' encoding bugs)
+if (!function_exists('money_pdf')) {
+    function money_pdf(float|int|string $amount): string
+    {
+        return 'Tk ' . number_format((float)$amount, 2);
     }
 }
 
@@ -231,8 +241,15 @@ if (!function_exists('admin_required')) {
 }
 
 if (!function_exists('send_store_email')) {
-    function send_store_email(string $to, string $name, string $subject, string $html, string $attachmentContent = '', string $attachmentFilename = 'invoice.html'): bool
-    {
+    function send_store_email(
+        string $to,
+        string $name,
+        string $subject,
+        string $html,
+        string $attachmentContent = '',
+        string $attachmentFilename = 'invoice.pdf',
+        string $attachmentMime = 'application/pdf'
+    ): bool {
         $autoload = dirname(__DIR__) . '/vendor/autoload.php';
 
         $getSetting = function (string $key, string $envKey, string $default = ''): string {
@@ -267,7 +284,7 @@ if (!function_exists('send_store_email')) {
             $mail->SMTPSecure = $mailEnc;
             $mail->CharSet    = 'UTF-8';
 
-            // Bypass SSL Peer Verification for free shared hosting/local environments
+            // Bypass SSL Peer Verification for local/shared environments
             $mail->SMTPOptions = array(
                 'ssl' => array(
                     'verify_peer' => false,
@@ -283,8 +300,9 @@ if (!function_exists('send_store_email')) {
             $mail->Body    = $html;
             $mail->AltBody = strip_tags(str_replace(['<br>', '<br/>', '</p>'], "\n", $html));
 
+            // Attach PDF or fallback attachment
             if ($attachmentContent !== '') {
-                $mail->addStringAttachment($attachmentContent, $attachmentFilename, 'base64', 'text/html');
+                $mail->addStringAttachment($attachmentContent, $attachmentFilename, 'base64', $attachmentMime);
             }
 
             $mail->send();
@@ -411,6 +429,32 @@ if (!function_exists('email_admin_new_order')) {
     }
 }
 
+// Generates PDF or returns HTML string fallback
+if (!function_exists('generate_order_pdf_invoice')) {
+    function generate_order_pdf_invoice(string $html): string
+    {
+        // If Dompdf is installed via composer, render native PDF
+        if (class_exists('\\Dompdf\\Dompdf')) {
+            try {
+                $options = new Options();
+                $options->set('isRemoteEnabled', true);
+                $options->set('isHtml5ParserEnabled', true);
+                $options->set('defaultFont', 'Helvetica');
+
+                $dompdf = new Dompdf($options);
+                $dompdf->loadHtml($html);
+                $dompdf->setPaper('A4', 'portrait');
+                $dompdf->render();
+
+                return $dompdf->output();
+            } catch (Throwable $e) {
+                error_log('Dompdf render error: ' . $e->getMessage());
+            }
+        }
+        return '';
+    }
+}
+
 if (!function_exists('email_order_customer')) {
     function email_order_customer(array $order, array $items): void
     {
@@ -419,7 +463,7 @@ if (!function_exists('email_order_customer')) {
             return;
         }
 
-        $emailColor   = site_setting('invoice_color', '#2c3e50');
+        $emailColor   = site_setting('invoice_color', '#17594f');
         $logoUrl      = site_setting('logo_url', '');
         $storeName    = store_name();
         $invoiceNote  = site_setting('invoice_footer_note', 'Thank you for shopping with us!');
@@ -438,98 +482,148 @@ if (!function_exists('email_order_customer')) {
             ? '<img src="' . e(url($logoUrl)) . '" alt="' . e($storeName) . '" style="max-height:50px; margin-bottom:10px;">'
             : '<h2 style="color:' . $emailColor . '; margin:0; font-size:24px;">' . e($storeName) . '</h2>';
 
-        $rows = '';
+        // 1. Build Rows for the PDF using money_pdf()
+        $pdfRows = '';
+        foreach ($items as $i) {
+            $pName  = e($i['product_name'] ?? $i['name'] ?? 'Product Item');
+            $pQty   = max(1, (int)($i['quantity'] ?? $i['qty'] ?? 1));
+            $unitP  = (float)($i['price'] ?? $i['unit_price'] ?? 0);
+            $pTotal = money_pdf($unitP * $pQty);
+
+            $pdfRows .= '
+                <tr style="border-bottom:1px solid #eeeeee;">
+                    <td style="padding:10px 12px; font-size:13px; color:#222222;"><b>' . $pName . '</b></td>
+                    <td style="padding:10px 12px; font-size:13px; text-align:center; color:#555555;">' . $pQty . '</td>
+                    <td style="padding:10px 12px; font-size:13px; text-align:right; color:#222222; font-weight:bold;">' . $pTotal . '</td>
+                </tr>';
+        }
+
+        // 2. Build Rows for the Email Body using standard money()
+        $emailRows = '';
         foreach ($items as $i) {
             $pName  = e($i['product_name'] ?? $i['name'] ?? 'Product Item');
             $pQty   = max(1, (int)($i['quantity'] ?? $i['qty'] ?? 1));
             $unitP  = (float)($i['price'] ?? $i['unit_price'] ?? 0);
             $pTotal = money($unitP * $pQty);
 
-            $rows .= '
+            $emailRows .= '
                 <tr style="border-bottom:1px solid #eeeeee;">
-                    <td style="padding:12px; font-size:14px; color:#222222;"><b>' . $pName . '</b></td>
-                    <td style="padding:12px; font-size:14px; text-align:center; color:#555555;">' . $pQty . '</td>
-                    <td style="padding:12px; font-size:14px; text-align:right; color:#222222; font-weight:bold;">' . $pTotal . '</td>
+                    <td style="padding:10px 12px; font-size:13px; color:#222222;"><b>' . $pName . '</b></td>
+                    <td style="padding:10px 12px; font-size:13px; text-align:center; color:#555555;">' . $pQty . '</td>
+                    <td style="padding:10px 12px; font-size:13px; text-align:right; color:#222222; font-weight:bold;">' . $pTotal . '</td>
                 </tr>';
         }
 
-        $attachmentHtml = '<!doctype html>
+        // PDF-Optimized Invoice HTML layout (Dompdf compatible)
+        $invoiceHtml = '<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>Invoice ' . e($order['order_number']) . '</title>
 <style>
-    body { font-family: Arial, sans-serif; color: #333; margin: 0; padding: 40px; background: #fff; }
-    .invoice-card { max-width: 700px; margin: auto; border: 1px solid #e0e0e0; padding: 40px; border-radius: 8px; }
-    .header { display: flex; justify-content: space-between; border-bottom: 2px solid ' . $emailColor . '; padding-bottom: 20px; margin-bottom: 30px; }
-    table { width: 100%; border-collapse: collapse; margin: 25px 0; }
-    th { background: ' . $emailColor . '; color: #fff; padding: 12px; text-align: left; font-size: 13px; text-transform: uppercase; }
-    td { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; }
-    .totals { margin-left: auto; width: 280px; background: #f9f9f9; padding: 15px; border-radius: 6px; }
-    .totals div { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+    @page { margin: 25px 30px; }
+    body { font-family: Helvetica, Arial, sans-serif; color: #333; margin: 0; padding: 0; font-size: 13px; }
+    .header-table { width: 100%; border-bottom: 2px solid ' . $emailColor . '; padding-bottom: 15px; margin-bottom: 25px; }
+    .info-table { width: 100%; margin-bottom: 25px; }
+    .info-box { background: #fafafa; padding: 12px; border: 1px solid #f0f0f0; border-radius: 4px; }
+    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+    .items-table th { background: ' . $emailColor . '; color: #ffffff; padding: 10px 12px; text-align: left; font-size: 12px; text-transform: uppercase; }
+    .items-table td { padding: 10px 12px; border-bottom: 1px solid #eeeeee; font-size: 13px; }
+    .totals-table { width: 260px; margin-left: auto; border-collapse: collapse; }
+    .totals-table td { padding: 5px 8px; font-size: 13px; }
+    .footer { margin-top: 35px; border-top: 1px solid #eeeeee; padding-top: 15px; text-align: center; color: #777; font-size: 12px; }
 </style>
 </head>
 <body>
-<div class="invoice-card">
-    <div class="header">
-        <div>
-            ' . $logoHtml . '
-            <p style="margin:5px 0 0 0; color:#666; font-size:13px;">' . e(url()) . '</p>
-        </div>
-        <div style="text-align:right;">
-            <h1 style="margin:0; font-size:24px; color:' . $emailColor . ';">INVOICE</h1>
-            <p style="margin:4px 0 0 0; font-weight:bold;">' . e($order['order_number']) . '</p>
-            <p style="margin:2px 0 0 0; color:#777; font-size:13px;">Date: ' . date('d M, Y', strtotime($order['created_at'])) . '</p>
-        </div>
-    </div>
-    
-    <div style="display:flex; justify-content:space-between; margin-bottom:30px;">
-        <div style="width:48%; background:#fafafa; padding:15px; border-radius:6px; border:1px solid #f0f0f0;">
-            <b style="color:' . $emailColor . '; text-transform:uppercase; font-size:11px; display:block; margin-bottom:6px;">Billed To</b>
-            <strong>' . e($order['customer_name']) . '</strong><br>
-            <span style="font-size:13px; color:#555;">' . e($order['customer_email']) . '</span><br>
-            <span style="font-size:13px; color:#555;">' . e($order['customer_phone']) . '</span>
-        </div>
-        <div style="width:48%; background:#fafafa; padding:15px; border-radius:6px; border:1px solid #f0f0f0;">
-            <b style="color:' . $emailColor . '; text-transform:uppercase; font-size:11px; display:block; margin-bottom:6px;">Shipping Address</b>
-            <span style="font-size:13px; color:#333;">' . nl2br(e($order['address'])) . '</span><br>
-            <strong style="font-size:13px; color:' . $emailColor . ';">' . e($order['city']) . '</strong>
-        </div>
-    </div>
+    <table class="header-table">
+        <tr>
+            <td style="vertical-align:top;">
+                <h2 style="color:' . $emailColor . '; margin:0; font-size:24px;">' . e($storeName) . '</h2>
+                <p style="margin:4px 0 0 0; color:#666; font-size:12px;">' . e(url()) . '</p>
+            </td>
+            <td style="vertical-align:top; text-align:right;">
+                <h1 style="margin:0; font-size:22px; color:' . $emailColor . ';">INVOICE</h1>
+                <p style="margin:4px 0 0 0; font-weight:bold; font-size:14px;">' . e($order['order_number']) . '</p>
+                <p style="margin:2px 0 0 0; color:#777; font-size:12px;">Date: ' . date('d M, Y', strtotime($order['created_at'])) . '</p>
+            </td>
+        </tr>
+    </table>
 
-    <table>
+    <table class="info-table" cellpadding="0" cellspacing="0">
+        <tr>
+            <td style="width:48%; vertical-align:top;">
+                <div class="info-box">
+                    <b style="color:' . $emailColor . '; text-transform:uppercase; font-size:11px; display:block; margin-bottom:6px;">Billed To:</b>
+                    <strong>' . e($order['customer_name']) . '</strong><br>
+                    <span style="color:#555;">' . e($order['customer_email']) . '</span><br>
+                    <span style="color:#555;">' . e($order['customer_phone']) . '</span>
+                </div>
+            </td>
+            <td style="width:4%;"></td>
+            <td style="width:48%; vertical-align:top;">
+                <div class="info-box">
+                    <b style="color:' . $emailColor . '; text-transform:uppercase; font-size:11px; display:block; margin-bottom:6px;">Shipping Address:</b>
+                    <span style="color:#333;">' . nl2br(e($order['address'])) . '</span><br>
+                    <strong style="color:' . $emailColor . ';">' . e($order['city']) . '</strong>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="items-table">
         <thead>
             <tr>
                 <th>Item Description</th>
-                <th style="text-align:center;">Qty</th>
-                <th style="text-align:right;">Line Total</th>
+                <th style="text-align:center; width:50px;">Qty</th>
+                <th style="text-align:right; width:100px;">Line Total</th>
             </tr>
         </thead>
         <tbody>
-            ' . $rows . '
+            ' . $pdfRows . '
         </tbody>
     </table>
 
-    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div>
-            <b>Payment Method:</b>
-            <p style="margin:4px 0 0 0; font-weight:bold; color:' . $emailColor . ';">Cash on Delivery (COD)</p>
-        </div>
-        <div class="totals">
-            <div><span>Subtotal:</span> <span>' . money($order['subtotal']) . '</span></div>
-            <div><span>Discount:</span> <span style="color:#c0392b;">-' . money($order['discount_amount']) . '</span></div>
-            <div><span>Delivery Fee:</span> <span>' . money($order['shipping_amount']) . '</span></div>
-            <hr style="border:0; border-top:1px solid #ddd; margin:8px 0;">
-            <div style="font-size:16px; font-weight:bold; color:' . $emailColor . ';"><span>Total Due:</span> <span>' . money($order['total']) . '</span></div>
-        </div>
-    </div>
+    <table style="width:100%;">
+        <tr>
+            <td style="vertical-align:top;">
+                <b>Payment Method:</b>
+                <p style="margin:4px 0 0 0; font-weight:bold; color:' . $emailColor . ';">Cash on Delivery (COD)</p>
+            </td>
+            <td style="vertical-align:top; text-align:right;">
+                <table class="totals-table">
+                    <tr>
+                        <td style="text-align:left;">Subtotal:</td>
+                        <td style="text-align:right;">' . money_pdf($order['subtotal']) . '</td>
+                    </tr>
+                    <tr>
+                        <td style="text-align:left;">Discount:</td>
+                        <td style="text-align:right; color:#c0392b;">-' . money_pdf($order['discount_amount']) . '</td>
+                    </tr>
+                    <tr>
+                        <td style="text-align:left;">Delivery Fee:</td>
+                        <td style="text-align:right;">' . money_pdf($order['shipping_amount']) . '</td>
+                    </tr>
+                    <tr style="border-top:1px solid #ddd; font-weight:bold; font-size:15px;">
+                        <td style="text-align:left; padding-top:6px; color:' . $emailColor . ';">Total Due:</td>
+                        <td style="text-align:right; padding-top:6px; color:' . $emailColor . ';">' . money_pdf($order['total']) . '</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
 
-    <div style="margin-top:40px; border-top:1px solid #eee; padding-top:15px; text-align:center; color:#777; font-size:13px;">
+    <div class="footer">
         <p style="margin:0;">' . e($invoiceNote) . '</p>
     </div>
-</div>
 </body>
 </html>';
+
+        // Render to PDF
+        $pdfBinary = generate_order_pdf_invoice($invoiceHtml);
+
+        $attachmentData = $pdfBinary !== '' ? $pdfBinary : $invoiceHtml;
+        $attachmentFile = 'invoice-' . $order['order_number'] . ($pdfBinary !== '' ? '.pdf' : '.html');
+        $attachmentMime = $pdfBinary !== '' ? 'application/pdf' : 'text/html';
 
         $bodyHtml = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e5e5de; border-radius: 10px; background-color: #ffffff;">
@@ -539,7 +633,7 @@ if (!function_exists('email_order_customer')) {
             </div>
             
             <p style="font-size:15px; color:#333;">Hello <b>' . e($order['customer_name']) . '</b>,</p>
-            <p style="font-size:14px; color:#555; line-height:1.5;">Great news! Your order has been officially <b>confirmed</b> and is now being packaged for dispatch. A printable copy of your official invoice is attached to this email.</p>
+            <p style="font-size:14px; color:#555; line-height:1.5;">Great news! Your order has been officially <b>confirmed</b> and is now being packaged for dispatch. Your official PDF invoice is attached to this email.</p>
             
             <table style="width:100%; border-collapse:collapse; margin: 20px 0;" cellpadding="0" cellspacing="0">
                 <thead>
@@ -550,7 +644,7 @@ if (!function_exists('email_order_customer')) {
                     </tr>
                 </thead>
                 <tbody>
-                    ' . $rows . '
+                    ' . $emailRows . '
                     <tr>
                         <td colspan="2" style="padding:8px 10px; font-size:13px; color:#666;">Subtotal</td>
                         <td style="text-align:right; padding:8px 10px; font-size:13px; color:#666;">' . money($order['subtotal']) . '</td>
@@ -585,8 +679,9 @@ if (!function_exists('email_order_customer')) {
             $order['customer_name'],
             $emailSubject,
             $bodyHtml,
-            $attachmentHtml,
-            'invoice-' . $order['order_number'] . '.html'
+            $attachmentData,
+            $attachmentFile,
+            $attachmentMime
         );
     }
 }
@@ -679,7 +774,7 @@ if (!function_exists('is_super_admin')) {
 if (!function_exists('has_permission')) {
     function has_permission(string $module): bool
     {
-        if (is_super_admin()) return true; // Super Admin has unlimited access
+        if (is_super_admin()) return true;
 
         if (empty($_SESSION['admin_id'])) return false;
 
@@ -725,7 +820,6 @@ if (!function_exists('sync_htpasswd_user')) {
         $newLine = $username . ':' . $hash;
 
         $rawContent = file_exists($htpasswdPath) ? file_get_contents($htpasswdPath) : '';
-        // Standardize all Windows (\r\n) newlines to Unix (\n)
         $rawContent = str_replace("\r\n", "\n", $rawContent);
         $lines = array_filter(array_map('trim', explode("\n", $rawContent)), fn($l) => $l !== '');
 
@@ -758,15 +852,12 @@ if (site_setting('maintenance_mode', '0') === '1') {
     $reqUri = $_SERVER['REQUEST_URI'] ?? '';
     $isAdminRoute = str_contains($reqUri, '/manage_portal_x92/') || str_contains($reqUri, '/admin/');
 
-    // Check if user is an active admin AND has explicitly requested live storefront preview mode (?preview=1)
     $isLoggedInAdmin = !empty($_SESSION['admin_id']);
     $isAdminPreview  = isset($_GET['preview']) || isset($_GET['admin_test']);
 
-    // Display Maintenance Page to all public visitors, customers, and admins NOT in explicit preview mode
     if (!$isAdminRoute && (!$isLoggedInAdmin || !$isAdminPreview)) {
         http_response_code(503);
 
-        // Send strict anti-cache headers so browsers never cache the live page during maintenance
         header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         header('Cache-Control: post-check=0, pre-check=0', false);
         header('Pragma: no-cache');
@@ -870,6 +961,7 @@ if (!str_contains($reqUri, '/manage_portal_x92/') && !str_contains($reqUri, '/ad
         // Silently ignore log errors
     }
 }
+
 /**
  * Log administrative activity to admin_activity_logs
  */
