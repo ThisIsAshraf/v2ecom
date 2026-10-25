@@ -57,6 +57,56 @@ $st = db()->prepare($sql);
 $st->execute($args);
 $products = $st->fetchAll();
 
+// Multi-Variant Optimization: Batch load variants for all visible products
+$productIds = array_column($products, 'id');
+$variantDataByProduct = [];
+
+if (!empty($productIds)) {
+    $inMarks = implode(',', array_fill(0, count($productIds), '?'));
+    $vStmt = db()->prepare("
+        SELECT product_id, color, size, stock, additional_price 
+        FROM product_variants 
+        WHERE product_id IN ($inMarks)
+        ORDER BY id ASC
+    ");
+    $vStmt->execute($productIds);
+    $allVariants = $vStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($allVariants as $v) {
+        $pId = (int)$v['product_id'];
+        if (!isset($variantDataByProduct[$pId])) {
+            $variantDataByProduct[$pId] = [
+                'colors'     => [],
+                'sizes'      => [],
+                'max_price'  => 0.0,
+                'min_price'  => 0.0,
+                'has_delta'  => false,
+                'total_stock' => 0
+            ];
+        }
+
+        $c = trim((string)($v['color'] ?? ''));
+        $sz = trim((string)($v['size'] ?? ''));
+        $stk = (int)$v['stock'];
+        $addPrice = (float)($v['additional_price'] ?? 0);
+
+        if ($c !== '' && !in_array($c, $variantDataByProduct[$pId]['colors'], true)) {
+            $variantDataByProduct[$pId]['colors'][] = $c;
+        }
+        if ($sz !== '' && !in_array($sz, $variantDataByProduct[$pId]['sizes'], true)) {
+            $variantDataByProduct[$pId]['sizes'][] = $sz;
+        }
+
+        if ($addPrice > 0) {
+            $variantDataByProduct[$pId]['has_delta'] = true;
+            if ($addPrice > $variantDataByProduct[$pId]['max_price']) {
+                $variantDataByProduct[$pId]['max_price'] = $addPrice;
+            }
+        }
+        $variantDataByProduct[$pId]['total_stock'] += $stk;
+    }
+}
+
 // Dynamic Hero Banner Slides & Testimonials
 $slides = db()->query('SELECT * FROM hero_slides WHERE active=1 ORDER BY sort_order ASC, id DESC')->fetchAll();
 $testimonials = db()->query('SELECT * FROM testimonials WHERE active=1 ORDER BY sort_order ASC, id DESC')->fetchAll();
@@ -289,6 +339,24 @@ require_once __DIR__ . '/app/header.php';
 
     .product-info h3 a:hover {
         color: var(--primary-color);
+    }
+
+    .variant-swatches-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+    }
+
+    .color-swatch-badge {
+        font-size: 10px;
+        font-weight: 600;
+        color: #3730a3;
+        background: #eef2ff;
+        border: 1px solid #c7d2fe;
+        padding: 1px 6px;
+        border-radius: 4px;
     }
 
     .size-tags-row {
@@ -567,13 +635,44 @@ require_once __DIR__ . '/app/header.php';
 <?php else: ?>
     <div class="product-grid">
         <?php foreach ($products as $p):
+            $pId = (int)$p['id'];
             $cover = $p['cover_image'] ?? $p['image_url'];
             $imgSrc = !empty($cover) ? (str_starts_with($cover, 'http') ? $cover : url($cover)) : 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=800';
+
             $discountPct = 0;
             if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']) {
                 $discountPct = round((($p['compare_price'] - $p['price']) / $p['compare_price']) * 100);
             }
-            $cardSizes = !empty($p['sizes']) ? array_filter(array_map('trim', explode(',', (string)$p['sizes']))) : [];
+
+            // Resolve Multi-Variant Colors and Sizes
+            $vMeta = $variantDataByProduct[$pId] ?? null;
+
+            // Colors: prioritize matrix, fallback to product table column
+            $cardColors = [];
+            if ($vMeta && !empty($vMeta['colors'])) {
+                $cardColors = $vMeta['colors'];
+            } elseif (!empty($p['colors'])) {
+                $cardColors = array_filter(array_map('trim', explode(',', (string)$p['colors'])));
+            }
+
+            // Sizes: prioritize matrix, fallback to product table column
+            $cardSizes = [];
+            if ($vMeta && !empty($vMeta['sizes'])) {
+                $cardSizes = $vMeta['sizes'];
+            } elseif (!empty($p['sizes'])) {
+                $cardSizes = array_filter(array_map('trim', explode(',', (string)$p['sizes'])));
+            }
+
+            // Dynamic Price Label (e.g. "From ৳..." if variants have additional pricing)
+            $basePrice = (float)$p['price'];
+            $hasPriceDelta = $vMeta && $vMeta['has_delta'];
+            $maxVariantPrice = $hasPriceDelta ? ($basePrice + $vMeta['max_price']) : $basePrice;
+
+            // In-stock evaluation
+            $isOutOfStock = ($p['stock'] < 1);
+            if ($vMeta && $vMeta['total_stock'] !== null && count($vMeta['sizes']) > 0) {
+                $isOutOfStock = ($vMeta['total_stock'] < 1);
+            }
         ?>
             <article class="product-card">
                 <a class="product-image-wrap" href="<?= e(url('product.php?slug=' . urlencode($p['slug']))) ?>">
@@ -581,7 +680,7 @@ require_once __DIR__ . '/app/header.php';
                     <?php if ($discountPct > 0): ?>
                         <span class="badge-discount">-<?= $discountPct ?>% OFF</span>
                     <?php endif; ?>
-                    <?php if ((int)$p['stock'] < 1): ?>
+                    <?php if ($isOutOfStock): ?>
                         <span class="badge-soldout">Out of Stock</span>
                     <?php endif; ?>
                 </a>
@@ -590,6 +689,21 @@ require_once __DIR__ . '/app/header.php';
                     <h3>
                         <a href="<?= e(url('product.php?slug=' . urlencode($p['slug']))) ?>"><?= e($p['name']) ?></a>
                     </h3>
+
+                    <!-- Available Colors Display -->
+                    <?php if (!empty($cardColors)): ?>
+                        <div class="variant-swatches-row">
+                            <?php
+                            $shownColors = array_slice($cardColors, 0, 3);
+                            $moreColorsCount = count($cardColors) - count($shownColors);
+                            foreach ($shownColors as $col): ?>
+                                <span class="color-swatch-badge"><?= e($col) ?></span>
+                            <?php endforeach; ?>
+                            <?php if ($moreColorsCount > 0): ?>
+                                <span class="muted small" style="font-size:10px;">+<?= $moreColorsCount ?> more</span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
 
                     <!-- Available Sizes Display -->
                     <?php if (!empty($cardSizes)): ?>
@@ -601,18 +715,20 @@ require_once __DIR__ . '/app/header.php';
                     <?php endif; ?>
 
                     <div class="price-group">
-                        <span class="price-main"><?= money($p['price']) ?></span>
+                        <span class="price-main">
+                            <?= $hasPriceDelta ? 'From ' : '' ?><?= money($basePrice) ?>
+                        </span>
                         <?php if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']): ?>
                             <span class="price-old"><?= money($p['compare_price']) ?></span>
                         <?php endif; ?>
                     </div>
 
-                    <?php if ((int)$p['stock'] > 0): ?>
+                    <?php if (!$isOutOfStock): ?>
                         <a class="action-btn" href="<?= e(url('product.php?slug=' . urlencode($p['slug']))) ?>">
                             View & Order
                         </a>
                     <?php else: ?>
-                        <button class="action-btn" disabled style="background:#ccc; cursor:not-allowed;">Sold Out</button>
+                        <button class="action-btn" disabled style="background:#cbd5e1; color:#64748b; cursor:not-allowed;">Sold Out</button>
                     <?php endif; ?>
                 </div>
             </article>

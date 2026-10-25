@@ -47,7 +47,7 @@ $pageTitle = 'Track Your Order';
 require_once __DIR__ . '/app/header.php';
 ?>
 
-<div style="max-width: 700px; margin: 0 auto 40px auto;">
+<div style="max-width: 720px; margin: 0 auto 40px auto;">
     <h1 class="page-title">Track Your Order</h1>
     <p class="muted">Check the real-time fulfillment status of your delivery.</p>
 
@@ -79,6 +79,11 @@ require_once __DIR__ . '/app/header.php';
                 <div>
                     <h2 style="margin:0;"><?= e($order['order_number']) ?></h2>
                     <p class="muted small" style="margin:4px 0 0 0;">Placed on <?= date('F j, Y g:i a', strtotime($order['created_at'])) ?></p>
+                    <?php if (!empty($order['tracking_number'])): ?>
+                        <p style="margin:4px 0 0 0; font-size:13px; color:#2563eb; font-weight:600;">
+                            Consignment / Courier Tracking: <code><?= e($order['tracking_number']) ?></code>
+                        </p>
+                    <?php endif; ?>
                 </div>
                 <div>
                     <span class="status" style="padding: 6px 12px; border-radius: 4px; font-weight: bold; text-transform: uppercase; font-size: 13px; background: <?= in_array($order['status'], ['delivered', 'completed'], true) ? '#e8f8f5; color:#27ae60;' : ($order['status'] === 'cancelled' ? '#fde8e8; color:#e74c3c;' : '#fef9e7; color:#f39c12;') ?>">
@@ -99,23 +104,43 @@ require_once __DIR__ . '/app/header.php';
                 </div>
             </div>
 
-            <!-- Items Ordered Table -->
+            <!-- Items Ordered Table (Includes Color and Size Options) -->
             <h3>Items in Order</h3>
             <div class="table-wrap" style="margin-bottom: 20px;">
-                <table>
+                <table style="width:100%; border-collapse:collapse;">
                     <thead>
-                        <tr>
-                            <th>Item</th>
-                            <th>Qty</th>
-                            <th style="text-align:right;">Total</th>
+                        <tr style="border-bottom:2px solid var(--line, #eee); text-align:left;">
+                            <th style="padding:10px 8px;">Item Description</th>
+                            <th style="padding:10px 8px; text-align:center;">Qty</th>
+                            <th style="padding:10px 8px; text-align:right;">Total</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($lines as $l): ?>
-                            <tr>
-                                <td><?= e($l['product_name']) ?></td>
-                                <td><?= (int)$l['quantity'] ?></td>
-                                <td style="text-align:right;"><b><?= money($l['line_total']) ?></b></td>
+                            <tr style="border-bottom:1px solid #f1f5f9;">
+                                <td style="padding:10px 8px;">
+                                    <span style="font-weight:600; display:block;"><?= e($l['product_name']) ?></span>
+
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                                        <?php if (!empty($l['color'])): ?>
+                                            <span style="display:inline-block; background:#e0e7ff; color:#3730a3; font-size:11px; font-weight:700; padding:2px 7px; border-radius:4px;">
+                                                Color: <?= e($l['color']) ?>
+                                            </span>
+                                        <?php endif; ?>
+                                        <?php if (!empty($l['size'])): ?>
+                                            <span style="display:inline-block; background:#0f172a; color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:4px;">
+                                                Size: <?= e($l['size']) ?>
+                                            </span>
+                                        <?php endif; ?>
+                                        <?php if (!empty($l['sku'])): ?>
+                                            <span class="muted small" style="font-size:11px; padding:2px 4px;">
+                                                SKU: <?= e($l['sku']) ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                                <td style="padding:10px 8px; text-align:center; font-weight:bold;"><?= (int)$l['quantity'] ?></td>
+                                <td style="padding:10px 8px; text-align:right;"><b><?= money($l['line_total']) ?></b></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

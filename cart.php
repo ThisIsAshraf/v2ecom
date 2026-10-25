@@ -13,14 +13,20 @@ function get_detailed_cart_items(): array
     $rawItems = [];
 
     foreach ($cart as $key => $item) {
-        $pId = 0;
-        $qty = 0;
-        $size = '';
+        $pId   = 0;
+        $qty   = 0;
+        $color = '';
+        $size  = '';
+        $customPrice = null;
 
         if (is_array($item)) {
-            $pId = (int)($item['product_id'] ?? 0);
-            $qty = max(0, (int)($item['qty'] ?? 0));
-            $size = trim((string)($item['size'] ?? ''));
+            $pId   = (int)($item['product_id'] ?? 0);
+            $qty   = max(0, (int)($item['qty'] ?? 0));
+            $color = trim((string)($item['color'] ?? ''));
+            $size  = trim((string)($item['size'] ?? ''));
+            if (isset($item['price'])) {
+                $customPrice = (float)$item['price'];
+            }
         } else {
             // Legacy format fallback: key is product_id, value is qty
             $pId = (int)$key;
@@ -30,10 +36,12 @@ function get_detailed_cart_items(): array
         if ($pId > 0 && $qty > 0) {
             $productIds[] = $pId;
             $rawItems[] = [
-                'cart_key'   => (string)$key,
-                'product_id' => $pId,
-                'qty'        => $qty,
-                'size'       => $size
+                'cart_key'     => (string)$key,
+                'product_id'   => $pId,
+                'qty'          => $qty,
+                'color'        => $color,
+                'size'         => $size,
+                'custom_price' => $customPrice
             ];
         }
     }
@@ -44,6 +52,8 @@ function get_detailed_cart_items(): array
 
     $productIds = array_unique($productIds);
     $inMarks = implode(',', array_fill(0, count($productIds), '?'));
+
+    // Fetch products
     $stmt = db()->prepare("
         SELECT p.*, COALESCE(pi.image_url, p.image_url) AS cover_image 
         FROM products p 
@@ -58,6 +68,21 @@ function get_detailed_cart_items(): array
         $prodMap[$p['id']] = $p;
     }
 
+    // Fetch variant records for these products
+    $vStmt = db()->prepare("
+        SELECT * FROM product_variants 
+        WHERE product_id IN ($inMarks)
+    ");
+    $vStmt->execute(array_values($productIds));
+    $allVariants = $vStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Map by "product_id|color|size"
+    $vMatrix = [];
+    foreach ($allVariants as $v) {
+        $vk = (int)$v['product_id'] . '|' . trim((string)($v['color'] ?? '')) . '|' . trim((string)($v['size'] ?? ''));
+        $vMatrix[$vk] = $v;
+    }
+
     $items = [];
     foreach ($rawItems as $r) {
         $pId = $r['product_id'];
@@ -65,10 +90,21 @@ function get_detailed_cart_items(): array
             continue;
         }
 
-        $p = $prodMap[$pId];
+        $p     = $prodMap[$pId];
         $price = (float)$p['price'];
-        $qty = $r['qty'];
+        $qty   = $r['qty'];
         $cover = $p['cover_image'] ?? $p['image_url'];
+        $stock = (int)$p['stock'];
+
+        // Check if there is a matching variant for stock and additional pricing
+        $vk = $pId . '|' . $r['color'] . '|' . $r['size'];
+        if (isset($vMatrix[$vk])) {
+            $matchedVar = $vMatrix[$vk];
+            $stock = (int)$matchedVar['stock'];
+            $price += (float)($matchedVar['additional_price'] ?? 0);
+        } elseif ($r['custom_price'] !== null) {
+            $price = $r['custom_price'];
+        }
 
         $imgUrl = $cover
             ? (str_starts_with($cover, 'http') ? $cover : url($cover))
@@ -81,7 +117,8 @@ function get_detailed_cart_items(): array
             'slug'       => $p['slug'],
             'price'      => $price,
             'qty'        => $qty,
-            'stock'      => (int)$p['stock'],
+            'stock'      => $stock,
+            'color'      => $r['color'],
             'size'       => $r['size'],
             'image_url'  => $imgUrl,
             'line_total' => $price * $qty
@@ -106,10 +143,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 if (isset($_SESSION['cart'][$key])) {
                     if (is_array($_SESSION['cart'][$key])) {
-                        $pId = (int)($_SESSION['cart'][$key]['product_id'] ?? 0);
-                        $s = db()->prepare('SELECT stock FROM products WHERE id = ?');
-                        $s->execute([$pId]);
-                        $stock = (int)$s->fetchColumn();
+                        $pId   = (int)($_SESSION['cart'][$key]['product_id'] ?? 0);
+                        $color = trim((string)($_SESSION['cart'][$key]['color'] ?? ''));
+                        $size  = trim((string)($_SESSION['cart'][$key]['size'] ?? ''));
+
+                        // Determine accurate variant-level stock
+                        $stock = 0;
+                        if ($color !== '' || $size !== '') {
+                            $vs = db()->prepare('
+                                SELECT stock FROM product_variants 
+                                WHERE product_id = ? 
+                                  AND (color = ? OR (color IS NULL AND ? = "")) 
+                                  AND (size = ? OR (size IS NULL AND ? = "")) 
+                                LIMIT 1
+                            ');
+                            $vs->execute([$pId, $color, $color, $size, $size]);
+                            $foundStock = $vs->fetchColumn();
+                            if ($foundStock !== false) {
+                                $stock = (int)$foundStock;
+                            }
+                        }
+
+                        if ($stock === 0) {
+                            $s = db()->prepare('SELECT stock FROM products WHERE id = ?');
+                            $s->execute([$pId]);
+                            $stock = (int)$s->fetchColumn();
+                        }
 
                         if ($stock > 0) {
                             $_SESSION['cart'][$key]['qty'] = min($stock, $qty);
@@ -176,20 +235,28 @@ require_once __DIR__ . '/app/header.php';
                                 <div style="display:flex; align-items:center; gap:12px">
                                     <img src="<?= e($i['image_url']) ?>" alt="<?= e($i['name']) ?>" style="width:65px; height:75px; object-fit:cover; border-radius:4px; border:1px solid #eee;">
                                     <div>
-                                        <a href="<?= e(url('products.php?slug=' . urlencode($i['slug']))) ?>" style="text-decoration:none; font-weight:bold; color:inherit; display:block;">
+                                        <a href="<?= e(url('product.php?slug=' . urlencode($i['slug']))) ?>" style="text-decoration:none; font-weight:bold; color:inherit; display:block;">
                                             <?= e($i['name']) ?>
                                         </a>
-                                        <?php if (!empty($i['size'])): ?>
-                                            <span style="display:inline-block; margin-top:4px; background:#0f172a; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px;">
-                                                Size: <?= e($i['size']) ?>
-                                            </span>
-                                        <?php endif; ?>
+                                        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                                            <?php if (!empty($i['color'])): ?>
+                                                <span style="display:inline-block; background:#e0e7ff; color:#3730a3; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px;">
+                                                    Color: <?= e($i['color']) ?>
+                                                </span>
+                                            <?php endif; ?>
+                                            <?php if (!empty($i['size'])): ?>
+                                                <span style="display:inline-block; background:#0f172a; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px;">
+                                                    Size: <?= e($i['size']) ?>
+                                                </span>
+                                            <?php endif; ?>
+                                        </div>
                                     </div>
                                 </div>
                             </td>
                             <td><?= money($i['price']) ?></td>
                             <td>
                                 <input style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;" type="number" min="0" max="<?= max(1, (int)$i['stock']) ?>" name="qty[<?= e($i['cart_key']) ?>]" value="<?= (int)$i['qty'] ?>">
+                                <small class="muted" style="display:block; font-size:11px; margin-top:2px;">(Max: <?= (int)$i['stock'] ?>)</small>
                             </td>
                             <td><b><?= money($i['line_total']) ?></b></td>
                         </tr>

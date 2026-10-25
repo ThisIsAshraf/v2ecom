@@ -1,6 +1,6 @@
 <?php require_once __DIR__ . '/app/bootstrap.php';
 
-// Helper to ensure item sizes and stock details are properly loaded from the session cart
+// Helper to ensure item colors, sizes, and variant stock details are properly loaded from the session cart
 function resolve_checkout_items(): array
 {
     $cart = $_SESSION['cart'] ?? [];
@@ -12,15 +12,22 @@ function resolve_checkout_items(): array
     $rawItems = [];
 
     foreach ($cart as $key => $item) {
-        $pId = 0;
-        $qty = 0;
-        $size = '';
+        $pId   = 0;
+        $qty   = 0;
+        $color = '';
+        $size  = '';
+        $customPrice = null;
 
         if (is_array($item)) {
-            $pId = (int)($item['product_id'] ?? 0);
-            $qty = max(0, (int)($item['qty'] ?? 0));
-            $size = trim((string)($item['size'] ?? ''));
+            $pId   = (int)($item['product_id'] ?? 0);
+            $qty   = max(0, (int)($item['qty'] ?? 0));
+            $color = trim((string)($item['color'] ?? ''));
+            $size  = trim((string)($item['size'] ?? ''));
+            if (isset($item['price'])) {
+                $customPrice = (float)$item['price'];
+            }
         } else {
+            // Legacy format fallback: key is product_id, value is qty
             $pId = (int)$key;
             $qty = max(0, (int)$item);
         }
@@ -28,10 +35,12 @@ function resolve_checkout_items(): array
         if ($pId > 0 && $qty > 0) {
             $productIds[] = $pId;
             $rawItems[] = [
-                'cart_key'   => (string)$key,
-                'product_id' => $pId,
-                'qty'        => $qty,
-                'size'       => $size
+                'cart_key'     => (string)$key,
+                'product_id'   => $pId,
+                'qty'          => $qty,
+                'color'        => $color,
+                'size'         => $size,
+                'custom_price' => $customPrice
             ];
         }
     }
@@ -42,6 +51,8 @@ function resolve_checkout_items(): array
 
     $productIds = array_unique($productIds);
     $inMarks = implode(',', array_fill(0, count($productIds), '?'));
+
+    // Fetch products
     $stmt = db()->prepare("SELECT * FROM products WHERE id IN ($inMarks)");
     $stmt->execute(array_values($productIds));
     $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -51,6 +62,17 @@ function resolve_checkout_items(): array
         $prodMap[$p['id']] = $p;
     }
 
+    // Fetch variants to resolve exact pricing, variant SKU, and stock
+    $vStmt = db()->prepare("SELECT * FROM product_variants WHERE product_id IN ($inMarks)");
+    $vStmt->execute(array_values($productIds));
+    $allVariants = $vStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $vMatrix = [];
+    foreach ($allVariants as $v) {
+        $vk = (int)$v['product_id'] . '|' . trim((string)($v['color'] ?? '')) . '|' . trim((string)($v['size'] ?? ''));
+        $vMatrix[$vk] = $v;
+    }
+
     $items = [];
     foreach ($rawItems as $r) {
         $pId = $r['product_id'];
@@ -58,20 +80,35 @@ function resolve_checkout_items(): array
             continue;
         }
 
-        $p = $prodMap[$pId];
+        $p     = $prodMap[$pId];
         $price = (float)$p['price'];
-        $qty = $r['qty'];
+        $qty   = $r['qty'];
+        $sku   = $p['sku'] ?? null;
+        $stock = (int)$p['stock'];
+
+        $vk = $pId . '|' . $r['color'] . '|' . $r['size'];
+        if (isset($vMatrix[$vk])) {
+            $matchedVar = $vMatrix[$vk];
+            $stock = (int)$matchedVar['stock'];
+            $price += (float)($matchedVar['additional_price'] ?? 0);
+            if (!empty($matchedVar['sku'])) {
+                $sku = $matchedVar['sku'];
+            }
+        } elseif ($r['custom_price'] !== null) {
+            $price = $r['custom_price'];
+        }
 
         $items[] = [
             'cart_key'   => $r['cart_key'],
             'id'         => $p['id'],
             'name'       => $p['name'],
             'slug'       => $p['slug'],
-            'sku'        => $p['sku'] ?? null,
+            'sku'        => $sku,
             'price'      => $price,
             'qty'        => $qty,
-            'stock'      => (int)$p['stock'],
+            'stock'      => $stock,
             'active'     => (int)$p['active'],
+            'color'      => $r['color'],
             'size'       => $r['size'],
             'line_total' => $price * $qty
         ];
@@ -164,8 +201,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cityObj = $cityStmt->fetch();
         if (!$cityObj) $errors[] = 'Please select a valid delivery city.';
 
-        // Check Inventory (Both Aggregate and Per-Size Variant)
-        $variantCheck = db()->prepare('SELECT stock FROM product_variants WHERE product_id = ? AND size = ? LIMIT 1');
+        // Check Inventory (Both Aggregate and Per Color/Size Variant)
+        $variantCheck = db()->prepare('
+            SELECT stock FROM product_variants 
+            WHERE product_id = ? 
+              AND (color = ? OR (color IS NULL AND ? = "")) 
+              AND (size = ? OR (size IS NULL AND ? = "")) 
+            LIMIT 1
+        ');
 
         foreach ($items as $i) {
             $s = db()->prepare('SELECT stock, active FROM products WHERE id=?');
@@ -177,12 +220,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
 
-            // Check variant stock if item has a specific size
-            if (!empty($i['size'])) {
-                $variantCheck->execute([$i['id'], $i['size']]);
+            // Check variant stock if item has color or size
+            if (!empty($i['color']) || !empty($i['size'])) {
+                $variantCheck->execute([$i['id'], $i['color'], $i['color'], $i['size'], $i['size']]);
                 $vStock = $variantCheck->fetchColumn();
                 if ($vStock !== false && (int)$vStock < (int)$i['qty']) {
-                    $errors[] = 'Insufficient stock for ' . $i['name'] . ' in Size ' . $i['size'] . '. Only ' . (int)$vStock . ' available.';
+                    $optLabel = trim(($i['color'] ? 'Color: ' . $i['color'] . ' ' : '') . ($i['size'] ? 'Size: ' . $i['size'] : ''));
+                    $errors[] = 'Insufficient stock for ' . $i['name'] . ' (' . $optLabel . '). Only ' . (int)$vStock . ' available.';
                 }
             }
         }
@@ -252,25 +296,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $orderId = (int)$pdo->lastInsertId();
 
-                // 3. Line Items & Inventory Updates (Deducts both product_variants and products.stock)
+                // 3. Line Items & Multi-Variant Inventory Deductions
                 $line = $pdo->prepare('
-                    INSERT INTO order_items (order_id, product_id, size, product_name, sku, quantity, unit_price, line_total) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO order_items (order_id, product_id, color, size, product_name, sku, quantity, unit_price, line_total) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ');
                 $stockUpdate = $pdo->prepare('UPDATE products SET stock=stock-? WHERE id=? AND stock>=?');
-                $variantDeduct = $pdo->prepare('UPDATE product_variants SET stock=stock-? WHERE product_id=? AND size=? AND stock>=?');
+                $variantDeduct = $pdo->prepare('
+                    UPDATE product_variants 
+                    SET stock=stock-? 
+                    WHERE product_id=? 
+                      AND (color=? OR (color IS NULL AND ?="")) 
+                      AND (size=? OR (size IS NULL AND ?="")) 
+                      AND stock>=?
+                ');
 
                 foreach ($items as $i) {
-                    // Decrement size-specific variant stock if variant exists
-                    if (!empty($i['size'])) {
-                        $variantDeduct->execute([$i['qty'], $i['id'], $i['size'], $i['qty']]);
-                        // If variant existed but didn't have enough stock:
+                    $itemColor = $i['color'] !== '' ? $i['color'] : null;
+                    $itemSize  = $i['size'] !== '' ? $i['size'] : null;
+
+                    // Decrement color/size variant stock if configured
+                    if (!empty($i['color']) || !empty($i['size'])) {
+                        $variantDeduct->execute([
+                            $i['qty'],
+                            $i['id'],
+                            $i['color'],
+                            $i['color'],
+                            $i['size'],
+                            $i['size'],
+                            $i['qty']
+                        ]);
+
                         if ($variantDeduct->rowCount() === 0) {
-                            // Check if the variant actually exists for this product
-                            $vExists = $pdo->prepare('SELECT COUNT(*) FROM product_variants WHERE product_id=? AND size=?');
-                            $vExists->execute([$i['id'], $i['size']]);
+                            $vExists = $pdo->prepare('
+                                SELECT COUNT(*) FROM product_variants 
+                                WHERE product_id=? 
+                                  AND (color=? OR (color IS NULL AND ?="")) 
+                                  AND (size=? OR (size IS NULL AND ?=""))
+                            ');
+                            $vExists->execute([$i['id'], $i['color'], $i['color'], $i['size'], $i['size']]);
                             if ((int)$vExists->fetchColumn() > 0) {
-                                throw new RuntimeException('Inventory for size ' . $i['size'] . ' changed during checkout.');
+                                throw new RuntimeException('Inventory for selected variant changed during checkout.');
                             }
                         }
                     }
@@ -284,7 +350,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $line->execute([
                         $orderId,
                         $i['id'],
-                        $i['size'] ?: null,
+                        $itemColor,
+                        $itemSize,
                         $i['name'],
                         $i['sku'] ?? null,
                         $i['qty'],
@@ -308,14 +375,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $s->execute([$orderId]);
                 $order = $s->fetch();
 
-                $s = $pdo->prepare('SELECT product_name name, size, quantity, unit_price price, line_total FROM order_items WHERE order_id=?');
+                $s = $pdo->prepare('SELECT product_name name, color, size, quantity, unit_price price, line_total FROM order_items WHERE order_id=?');
                 $s->execute([$orderId]);
                 $mailItems = $s->fetchAll();
 
-                // Format item names to include sizes for emails
+                // Format item names to include both colors & sizes for emails
                 foreach ($mailItems as &$mi) {
-                    if (!empty($mi['size'])) {
-                        $mi['name'] .= ' (Size: ' . $mi['size'] . ')';
+                    $details = [];
+                    if (!empty($mi['color'])) $details[] = 'Color: ' . $mi['color'];
+                    if (!empty($mi['size']))  $details[] = 'Size: ' . $mi['size'];
+                    if (!empty($details)) {
+                        $mi['name'] .= ' (' . implode(', ', $details) . ')';
                     }
                 }
                 unset($mi);
@@ -405,11 +475,18 @@ require_once __DIR__ . '/app/header.php'; ?>
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:12px 0; border-bottom:1px solid var(--line);">
                 <div>
                     <span style="font-weight:600;"><?= e($i['name']) ?> × <?= (int)$i['qty'] ?></span>
-                    <?php if (!empty($i['size'])): ?>
-                        <span style="display:block; margin-top:3px; background:#0f172a; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; width:fit-content;">
-                            Size: <?= e($i['size']) ?>
-                        </span>
-                    <?php endif; ?>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:3px;">
+                        <?php if (!empty($i['color'])): ?>
+                            <span style="background:#e0e7ff; color:#3730a3; font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px;">
+                                Color: <?= e($i['color']) ?>
+                            </span>
+                        <?php endif; ?>
+                        <?php if (!empty($i['size'])): ?>
+                            <span style="background:#0f172a; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px;">
+                                Size: <?= e($i['size']) ?>
+                            </span>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <b><?= money($i['line_total']) ?></b>
             </div>

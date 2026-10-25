@@ -52,7 +52,7 @@ try {
             o.discount_amount,
             o.shipping_amount,
             o.total, 
-            o.coupon_code,
+            o.coupon_code, 
             o.created_at 
         FROM orders o
         LEFT JOIN shipping_cities sc ON sc.id = o.city_id
@@ -79,12 +79,13 @@ try {
     $order['shipping_amount'] = (float)$order['shipping_amount'];
     $order['total']           = (float)$order['total'];
 
-    // Fetch line items including size and primary cover thumbnail
+    // Fetch line items including color, size, and primary cover thumbnail
     $itemsStmt = $db->prepare('
         SELECT 
             oi.id,
             oi.product_id, 
             oi.product_name, 
+            oi.color,
             oi.size,
             oi.sku, 
             oi.quantity, 
@@ -107,6 +108,7 @@ try {
             'id'           => (int)$item['id'],
             'product_id'   => (int)$item['product_id'],
             'product_name' => $item['product_name'],
+            'color'        => !empty($item['color']) ? $item['color'] : null,
             'size'         => !empty($item['size']) ? $item['size'] : null,
             'sku'          => $item['sku'],
             'quantity'     => (int)$item['quantity'],

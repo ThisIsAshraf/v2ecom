@@ -35,54 +35,101 @@ $gs = db()->prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY 
 $gs->execute([$product['id']]);
 $gallery = $gs->fetchAll();
 
-// Fetch size variants with individual stock numbers
+// Fetch variants with Color & Size matrix details
 $vStmt = db()->prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY id ASC');
 $vStmt->execute([$product['id']]);
 $variants = $vStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Map variant stock by size name
-$variantMap = [];
+// Build structured variant map and gather unique options
+$variantMap   = [];
+$colorOptions = [];
+$sizeOptions  = [];
+
 foreach ($variants as $v) {
-    if (!empty($v['size'])) {
-        $variantMap[$v['size']] = [
-            'id'    => (int)$v['id'],
-            'stock' => (int)$v['stock'],
-            'sku'   => $v['sku']
-        ];
+    $c  = trim((string)($v['color'] ?? ''));
+    $sz = trim((string)($v['size'] ?? ''));
+    $key = $c . '||' . $sz;
+
+    if ($c !== '' && !in_array($c, $colorOptions, true)) {
+        $colorOptions[] = $c;
     }
+    if ($sz !== '' && !in_array($sz, $sizeOptions, true)) {
+        $sizeOptions[] = $sz;
+    }
+
+    $variantMap[$key] = [
+        'id'               => (int)$v['id'],
+        'color'            => $c,
+        'size'             => $sz,
+        'stock'            => (int)$v['stock'],
+        'sku'              => $v['sku'] ?: $product['sku'],
+        'additional_price' => (float)($v['additional_price'] ?? 0)
+    ];
 }
 
-// Resolve available sizes (variants take priority, fallback to product comma-string)
-$productSizes = !empty($variantMap)
-    ? array_keys($variantMap)
-    : array_filter(array_map('trim', explode(',', (string)($product['sizes'] ?? ''))));
+// Fallbacks from products table if variants table had no specific colors/sizes defined
+if (empty($colorOptions) && !empty($product['colors'])) {
+    $colorOptions = array_filter(array_map('trim', explode(',', (string)$product['colors'])));
+}
+if (empty($sizeOptions) && !empty($product['sizes'])) {
+    $sizeOptions = array_filter(array_map('trim', explode(',', (string)$product['sizes'])));
+}
 
 // Handle Add to Bag POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
     verify_csrf();
-    $qty = max(1, (int)($_POST['qty'] ?? 1));
-    $selectedSize = trim((string)($_POST['size'] ?? ''));
+    $qty           = max(1, (int)($_POST['qty'] ?? 1));
+    $selectedColor = trim((string)($_POST['color'] ?? ''));
+    $selectedSize  = trim((string)($_POST['size'] ?? ''));
 
-    // Validation: enforce size selection if sizes exist
-    if (!empty($productSizes) && $selectedSize === '') {
+    // Validation: enforce Color if colors exist
+    if (!empty($colorOptions) && $selectedColor === '') {
+        flash('error', 'Please select a color option before adding to your bag.');
+        redirect('product.php?slug=' . urlencode($slug));
+    }
+
+    // Validation: enforce Size if sizes exist
+    if (!empty($sizeOptions) && $selectedSize === '') {
         flash('error', 'Please choose a size before adding this product to your bag.');
         redirect('product.php?slug=' . urlencode($slug));
     }
 
-    // Determine available stock for the selected size
-    if (!empty($variantMap) && isset($variantMap[$selectedSize])) {
-        $availableStock = (int)$variantMap[$selectedSize]['stock'];
-    } else {
-        $availableStock = (int)$product['stock'];
+    $variantKey = $selectedColor . '||' . $selectedSize;
+    $availableStock = (int)$product['stock'];
+    $variantPriceDelta = 0.0;
+    $selectedSku = $product['sku'];
+
+    if (!empty($variantMap)) {
+        if (isset($variantMap[$variantKey])) {
+            $matched = $variantMap[$variantKey];
+            $availableStock    = $matched['stock'];
+            $variantPriceDelta = $matched['additional_price'];
+            $selectedSku       = $matched['sku'];
+        } elseif (isset($variantMap['||' . $selectedSize])) {
+            $matched = $variantMap['||' . $selectedSize];
+            $availableStock    = $matched['stock'];
+            $variantPriceDelta = $matched['additional_price'];
+            $selectedSku       = $matched['sku'];
+        } elseif (isset($variantMap[$selectedColor . '||'])) {
+            $matched = $variantMap[$selectedColor . '||'];
+            $availableStock    = $matched['stock'];
+            $variantPriceDelta = $matched['additional_price'];
+            $selectedSku       = $matched['sku'];
+        }
     }
 
+    $optionNoteParts = [];
+    if ($selectedColor !== '') $optionNoteParts[] = 'Color: ' . $selectedColor;
+    if ($selectedSize !== '')  $optionNoteParts[] = 'Size: ' . $selectedSize;
+    $optionNote = $optionNoteParts ? ' (' . implode(', ', $optionNoteParts) . ')' : '';
+
     if ($availableStock <= 0) {
-        flash('error', 'Size ' . $selectedSize . ' is currently out of stock.');
+        flash('error', 'The chosen variant' . $optionNote . ' is currently out of stock.');
         redirect('product.php?slug=' . urlencode($slug));
     }
 
     if ($qty > $availableStock) {
-        flash('error', 'Only ' . $availableStock . ' unit(s) available in stock for Size ' . $selectedSize . '.');
+        flash('error', 'Only ' . $availableStock . ' unit(s) available in stock for' . $optionNote . '.');
         redirect('product.php?slug=' . urlencode($slug));
     }
 
@@ -90,8 +137,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
         $_SESSION['cart'] = [];
     }
 
-    // Compound cart key: e.g. "12_M" or "12"
-    $cartKey = $selectedSize !== '' ? ($product['id'] . '_' . $selectedSize) : (string)$product['id'];
+    // Compound cart key: e.g. "12_Red_M", "12_M", or "12"
+    $keyParts = [(string)$product['id']];
+    if ($selectedColor !== '') $keyParts[] = preg_replace('/[^a-zA-Z0-9]/', '', $selectedColor);
+    if ($selectedSize !== '')  $keyParts[] = preg_replace('/[^a-zA-Z0-9]/', '', $selectedSize);
+    $cartKey = implode('_', $keyParts);
+
+    $finalUnitPrice = (float)$product['price'] + $variantPriceDelta;
 
     if (isset($_SESSION['cart'][$cartKey])) {
         if (is_array($_SESSION['cart'][$cartKey])) {
@@ -100,19 +152,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
             $_SESSION['cart'][$cartKey] = [
                 'product_id' => (int)$product['id'],
                 'qty'        => ((int)$_SESSION['cart'][$cartKey]) + $qty,
+                'color'      => $selectedColor,
                 'size'       => $selectedSize,
+                'price'      => $finalUnitPrice,
+                'sku'        => $selectedSku
             ];
         }
     } else {
         $_SESSION['cart'][$cartKey] = [
             'product_id' => (int)$product['id'],
             'qty'        => $qty,
+            'color'      => $selectedColor,
             'size'       => $selectedSize,
+            'price'      => $finalUnitPrice,
+            'sku'        => $selectedSku
         ];
     }
 
-    $sizeNote = $selectedSize !== '' ? ' (Size: ' . $selectedSize . ')' : '';
-    flash('success', $product['name'] . $sizeNote . ' added to your bag.');
+    flash('success', $product['name'] . $optionNote . ' added to your bag.');
     redirect('cart.php');
 }
 
@@ -163,10 +220,34 @@ $mainImg = !empty($product['cover_image'])
         </div>
 
         <?php if ((int)$product['stock'] > 0): ?>
-            <form method="post" style="margin-bottom:24px; max-width:360px;" id="addToBagForm">
+            <form method="post" style="margin-bottom:24px; max-width:400px;" id="addToBagForm">
                 <?= csrf_field() ?>
 
-                <?php if (!empty($productSizes)): ?>
+                <!-- Color Options -->
+                <?php if (!empty($colorOptions)): ?>
+                    <div class="field" style="margin-bottom:18px;">
+                        <label style="font-weight:bold; font-size:13px; display:flex; justify-content:space-between; margin-bottom:8px;">
+                            <span>Color <span style="color:#e11d48;">*</span></span>
+                            <span id="selectedColorLabel" style="font-weight:normal; color:#64748b;">Choose a color</span>
+                        </label>
+                        <input type="hidden" name="color" id="selectedColorInput" value="" required>
+
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="colorPillsWrap">
+                            <?php foreach ($colorOptions as $c): ?>
+                                <button type="button"
+                                    class="color-pill-btn"
+                                    data-color="<?= e($c) ?>"
+                                    onclick="selectProductColor(this, '<?= e(addslashes($c)) ?>')"
+                                    style="background:#fff; color:#0f172a; border:1px solid #cbd5e1; border-radius:6px; padding:7px 14px; font-weight:600; font-size:13px; cursor:pointer; min-width:48px; text-align:center;">
+                                    <?= e($c) ?>
+                                </button>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
+                <!-- Size Options -->
+                <?php if (!empty($sizeOptions)): ?>
                     <div class="field" style="margin-bottom:18px;">
                         <label style="font-weight:bold; font-size:13px; display:flex; justify-content:space-between; margin-bottom:8px;">
                             <span>Select Size <span style="color:#e11d48;">*</span></span>
@@ -174,18 +255,13 @@ $mainImg = !empty($product['cover_image'])
                         </label>
                         <input type="hidden" name="size" id="selectedSizeInput" value="" required>
 
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <?php foreach ($productSizes as $sz):
-                                $szStock = isset($variantMap[$sz]) ? (int)$variantMap[$sz]['stock'] : (int)$product['stock'];
-                                $isSoldOut = ($szStock <= 0);
-                            ?>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="sizePillsWrap">
+                            <?php foreach ($sizeOptions as $sz): ?>
                                 <button type="button"
-                                    class="size-pill-btn <?= $isSoldOut ? 'disabled-size' : '' ?>"
+                                    class="size-pill-btn"
                                     data-size="<?= e($sz) ?>"
-                                    data-stock="<?= $szStock ?>"
-                                    <?= $isSoldOut ? 'disabled' : '' ?>
-                                    onclick="selectProductSize(this, '<?= e(addslashes($sz)) ?>', <?= $szStock ?>)"
-                                    style="background:<?= $isSoldOut ? '#f1f5f9' : '#fff' ?>; color:<?= $isSoldOut ? '#94a3b8' : '#000' ?>; border:1px solid <?= $isSoldOut ? '#e2e8f0' : '#cbd5e1' ?>; border-radius:6px; padding:8px 16px; font-weight:600; font-size:13px; cursor:<?= $isSoldOut ? 'not-allowed' : 'pointer' ?>; min-width:44px; text-align:center; position:relative; text-decoration:<?= $isSoldOut ? 'line-through' : 'none' ?>;">
+                                    onclick="selectProductSize(this, '<?= e(addslashes($sz)) ?>')"
+                                    style="background:#fff; color:#0f172a; border:1px solid #cbd5e1; border-radius:6px; padding:7px 14px; font-weight:600; font-size:13px; cursor:pointer; min-width:44px; text-align:center;">
                                     <?= e($sz) ?>
                                 </button>
                             <?php endforeach; ?>
@@ -196,7 +272,7 @@ $mainImg = !empty($product['cover_image'])
                 <div class="field" style="margin-bottom:15px;">
                     <label style="font-weight:bold; font-size:13px; display:flex; justify-content:space-between; margin-bottom:6px;">
                         <span>Quantity</span>
-                        <span id="stockLimitHint" style="font-weight:normal; font-size:12px; color:#64748b;">In stock: <?= (int)$product['stock'] ?></span>
+                        <span id="stockLimitHint" style="font-weight:normal; font-size:12px; color:#64748b;">Total in stock: <?= (int)$product['stock'] ?></span>
                     </label>
                     <input type="number" id="qtyInput" name="qty" value="1" min="1" max="<?= (int)$product['stock'] ?>" style="padding:8px; width:100%; border-radius:6px; border:1px solid #ccc;">
                 </div>
@@ -215,6 +291,16 @@ $mainImg = !empty($product['cover_image'])
 </div>
 
 <script>
+    // Embedded variant data matrix
+    const variantMatrix = <?= json_encode($variantMap, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+    const basePrice = <?= (float)$product['price'] ?>;
+    const baseSku = <?= json_encode($product['sku']) ?>;
+    const hasColors = <?= !empty($colorOptions) ? 'true' : 'false' ?>;
+    const hasSizes = <?= !empty($sizeOptions) ? 'true' : 'false' ?>;
+
+    let currentColor = '';
+    let currentSize = '';
+
     function switchImage(thumbEl) {
         document.getElementById('mainProductImg').src = thumbEl.src;
         document.querySelectorAll('.thumb-img').forEach(el => {
@@ -223,27 +309,116 @@ $mainImg = !empty($product['cover_image'])
         thumbEl.style.border = '2px solid var(--accent, #333)';
     }
 
-    function selectProductSize(btnEl, size, stock) {
-        document.getElementById('selectedSizeInput').value = size;
-        document.getElementById('selectedSizeLabel').textContent = 'Selected: ' + size + ' (' + stock + ' in stock)';
+    function selectProductColor(btnEl, color) {
+        currentColor = color;
+        document.getElementById('selectedColorInput').value = color;
+        document.getElementById('selectedColorLabel').textContent = 'Selected: ' + color;
 
-        // Dynamically adjust maximum quantity input based on this size's stock
-        const qty = document.getElementById('qtyInput');
-        qty.max = stock;
-        if (parseInt(qty.value) > stock) {
-            qty.value = stock;
-        }
-        document.getElementById('stockLimitHint').textContent = stock + ' units available in ' + size;
-
-        // Reset and highlight active button
-        document.querySelectorAll('.size-pill-btn:not(.disabled-size)').forEach(b => {
+        // Highlight selected color pill
+        document.querySelectorAll('.color-pill-btn').forEach(b => {
             b.style.background = '#fff';
-            b.style.color = '#000';
+            b.style.color = '#0f172a';
             b.style.borderColor = '#cbd5e1';
         });
         btnEl.style.background = '#0f172a';
-        btnEl.style.color = '#ffffff';
+        btnEl.style.color = '#fff';
         btnEl.style.borderColor = '#0f172a';
+
+        updateVariantState();
+    }
+
+    function selectProductSize(btnEl, size) {
+        currentSize = size;
+        document.getElementById('selectedSizeInput').value = size;
+        document.getElementById('selectedSizeLabel').textContent = 'Selected: ' + size;
+
+        // Highlight selected size pill
+        document.querySelectorAll('.size-pill-btn:not(.sold-out)').forEach(b => {
+            b.style.background = '#fff';
+            b.style.color = '#0f172a';
+            b.style.borderColor = '#cbd5e1';
+        });
+        btnEl.style.background = '#0f172a';
+        btnEl.style.color = '#fff';
+        btnEl.style.borderColor = '#0f172a';
+
+        updateVariantState();
+    }
+
+    function updateVariantState() {
+        const vKey = (hasColors ? currentColor : '') + '||' + (hasSizes ? currentSize : '');
+        let matched = variantMatrix[vKey] || null;
+
+        // Fallback checks
+        if (!matched && currentSize && variantMatrix['||' + currentSize]) {
+            matched = variantMatrix['||' + currentSize];
+        } else if (!matched && currentColor && variantMatrix[currentColor + '||']) {
+            matched = variantMatrix[currentColor + '||'];
+        }
+
+        // Cross-update size button availability if color is selected
+        if (hasSizes && hasColors && currentColor) {
+            document.querySelectorAll('.size-pill-btn').forEach(b => {
+                const sz = b.getAttribute('data-size');
+                const checkKey = currentColor + '||' + sz;
+                const vItem = variantMatrix[checkKey];
+                const isOut = vItem && vItem.stock <= 0;
+
+                if (isOut) {
+                    b.classList.add('sold-out');
+                    b.disabled = true;
+                    b.style.background = '#f8fafc';
+                    b.style.color = '#94a3b8';
+                    b.style.borderColor = '#e2e8f0';
+                    b.style.cursor = 'not-allowed';
+                    b.style.textDecoration = 'line-through';
+                } else {
+                    b.classList.remove('sold-out');
+                    b.disabled = false;
+                    b.style.cursor = 'pointer';
+                    b.style.textDecoration = 'none';
+                    if (sz !== currentSize) {
+                        b.style.background = '#fff';
+                        b.style.color = '#0f172a';
+                        b.style.borderColor = '#cbd5e1';
+                    }
+                }
+            });
+        }
+
+        if (matched) {
+            // Update SKU
+            document.getElementById('displaySku').textContent = matched.sku || baseSku;
+
+            // Update Price (Base + Additional)
+            const finalPrice = basePrice + (parseFloat(matched.additional_price) || 0);
+            document.getElementById('displayPrice').textContent = '৳ ' + finalPrice.toFixed(2);
+
+            // Update Stock & Qty Input
+            const stock = matched.stock;
+            const qty = document.getElementById('qtyInput');
+            qty.max = Math.max(1, stock);
+            if (parseInt(qty.value) > stock) {
+                qty.value = Math.max(1, stock);
+            }
+
+            const btn = document.getElementById('addToBagBtn');
+            const hint = document.getElementById('stockLimitHint');
+
+            if (stock <= 0) {
+                hint.textContent = 'Out of Stock for selected option';
+                hint.style.color = '#dc2626';
+                btn.disabled = true;
+                btn.textContent = 'Variant Sold Out';
+                btn.style.opacity = '0.6';
+            } else {
+                hint.textContent = stock + ' units available in this option';
+                hint.style.color = '#64748b';
+                btn.disabled = false;
+                btn.textContent = 'Add to Bag';
+                btn.style.opacity = '1';
+            }
+        }
     }
 </script>
 

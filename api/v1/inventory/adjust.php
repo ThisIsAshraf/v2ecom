@@ -48,18 +48,28 @@ try {
     $affectedProductIds = [];
 
     // Prepared statements for lookups
-    $bySkuStmt  = $db->prepare('SELECT id, product_id, size, stock, sku FROM product_variants WHERE sku = ? LIMIT 1');
-    $byIdStmt   = $db->prepare('SELECT id, product_id, size, stock, sku FROM product_variants WHERE id = ? LIMIT 1');
-    $bySizeStmt = $db->prepare('SELECT id, product_id, size, stock, sku FROM product_variants WHERE product_id = ? AND size = ? LIMIT 1');
+    $bySkuStmt       = $db->prepare('SELECT id, product_id, color, size, stock, sku FROM product_variants WHERE sku = ? LIMIT 1');
+    $byIdStmt        = $db->prepare('SELECT id, product_id, color, size, stock, sku FROM product_variants WHERE id = ? LIMIT 1');
+    $byColorSizeStmt = $db->prepare('
+        SELECT id, product_id, color, size, stock, sku 
+        FROM product_variants 
+        WHERE product_id = ? 
+          AND (color = ? OR (color IS NULL AND ? = "")) 
+          AND (size = ? OR (size IS NULL AND ? = "")) 
+        LIMIT 1
+    ');
     $updateStmt = $db->prepare('UPDATE product_variants SET stock = ? WHERE id = ?');
+    $logStmt    = $db->prepare('INSERT INTO stock_logs (product_id, admin_id, change_type, quantity, old_stock, new_stock, note) VALUES (?, NULL, ?, ?, ?, ?, ?)');
 
     foreach ($adjustments as $idx => $adj) {
         $sku        = trim((string)($adj['sku'] ?? ''));
         $variantId  = (int)($adj['variant_id'] ?? 0);
         $productId  = (int)($adj['product_id'] ?? 0);
+        $color      = trim((string)($adj['color'] ?? ''));
         $size       = trim((string)($adj['size'] ?? ''));
         $mode       = strtolower(trim((string)($adj['mode'] ?? 'set'))); // 'set', 'increment', or 'decrement'
         $quantity   = (int)($adj['quantity'] ?? $adj['stock'] ?? 0);
+        $reasonNote = trim((string)($adj['note'] ?? 'API Stock Adjustment'));
 
         if (!in_array($mode, ['set', 'increment', 'decrement'], true)) {
             $db->rollBack();
@@ -77,16 +87,16 @@ try {
         } elseif ($variantId > 0) {
             $byIdStmt->execute([$variantId]);
             $variant = $byIdStmt->fetch(PDO::FETCH_ASSOC);
-        } elseif ($productId > 0 && $size !== '') {
-            $bySizeStmt->execute([$productId, $size]);
-            $variant = $bySizeStmt->fetch(PDO::FETCH_ASSOC);
+        } elseif ($productId > 0 && ($color !== '' || $size !== '')) {
+            $byColorSizeStmt->execute([$productId, $color, $color, $size, $size]);
+            $variant = $byColorSizeStmt->fetch(PDO::FETCH_ASSOC);
         }
 
         if (!$variant) {
             $db->rollBack();
             api_response(404, [
                 'status'  => 'error',
-                'message' => "Variant target not found at index {$idx} (SKU: '{$sku}', Variant ID: {$variantId}, Product ID: {$productId}, Size: '{$size}')."
+                'message' => "Variant target not found at index {$idx} (SKU: '{$sku}', Variant ID: {$variantId}, Product ID: {$productId}, Color: '{$color}', Size: '{$size}')."
             ]);
         }
 
@@ -101,19 +111,38 @@ try {
             $newStock = max(0, $oldStock - max(0, $quantity));
         }
 
+        $delta = $newStock - $oldStock;
+
         // Update variant stock
         $updateStmt->execute([$newStock, $variant['id']]);
+
+        // Audit Trail into stock_logs
+        $optParts = [];
+        if (!empty($variant['color'])) $optParts[] = 'Color: ' . $variant['color'];
+        if (!empty($variant['size']))  $optParts[] = 'Size: ' . $variant['size'];
+        $vTag = $optParts ? '[' . implode(', ', $optParts) . '] ' : '';
+        $logChangeType = $mode === 'increment' ? 'add' : ($mode === 'decrement' ? 'subtract' : 'set');
+
+        $logStmt->execute([
+            $variant['product_id'],
+            $logChangeType,
+            abs($delta),
+            $oldStock,
+            $newStock,
+            $vTag . $reasonNote
+        ]);
 
         $affectedProductIds[(int)$variant['product_id']] = true;
 
         $results[] = [
             'variant_id' => (int)$variant['id'],
             'sku'        => $variant['sku'],
+            'color'      => $variant['color'],
             'size'       => $variant['size'],
             'mode'       => $mode,
             'old_stock'  => $oldStock,
             'new_stock'  => $newStock,
-            'delta'      => $newStock - $oldStock
+            'delta'      => $delta
         ];
     }
 

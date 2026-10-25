@@ -45,7 +45,7 @@ try {
     $db = db();
 
     // 1. Resolve Shipping Details from shipping_cities
-    $shippingCost = 120.00; // Standard outside-city fallback
+    $shippingCost = 120.00; // Standard fallback
     $resolvedCity = $cityName;
     $zoneCode     = 'outside_dhaka';
 
@@ -77,10 +77,18 @@ try {
     $subtotal       = 0.0;
 
     $prodCheck = $db->prepare('SELECT id, name, price, stock, sku FROM products WHERE id = ? LIMIT 1');
-    $varCheck  = $db->prepare('SELECT id, sku, stock FROM product_variants WHERE product_id = ? AND size = ? LIMIT 1');
+    $varCheck  = $db->prepare('
+        SELECT id, sku, stock, additional_price 
+        FROM product_variants 
+        WHERE product_id = ? 
+          AND (color = ? OR (color IS NULL AND ? = "")) 
+          AND (size = ? OR (size IS NULL AND ? = "")) 
+        LIMIT 1
+    ');
 
     foreach ($items as $idx => $line) {
         $productId = (int)($line['product_id'] ?? 0);
+        $color     = trim((string)($line['color'] ?? ''));
         $size      = trim((string)($line['size'] ?? ''));
         $quantity  = (int)($line['quantity'] ?? 0);
 
@@ -108,24 +116,26 @@ try {
         $itemSku   = $product['sku'] ?? ('PROD-' . $product['id']);
         $variantId = null;
 
-        // If size is specified, check against product_variants
-        if ($size !== '') {
-            $varCheck->execute([$productId, $size]);
+        // If color or size is specified, check against product_variants matrix
+        if ($color !== '' || $size !== '') {
+            $varCheck->execute([$productId, $color, $color, $size, $size]);
             $variant = $varCheck->fetch(PDO::FETCH_ASSOC);
 
             if (!$variant) {
                 $db->rollBack();
+                $variantLabel = trim(($color ? "Color: {$color} " : '') . ($size ? "Size: {$size}" : ''));
                 api_response(422, [
                     'status'  => 'error',
-                    'message' => "Size '{$size}' is unavailable for product '{$product['name']}'."
+                    'message' => "Variant '{$variantLabel}' is unavailable for product '{$product['name']}'."
                 ]);
             }
 
             if ((int)$variant['stock'] < $quantity) {
                 $db->rollBack();
+                $variantLabel = trim(($color ? "Color: {$color} " : '') . ($size ? "Size: {$size}" : ''));
                 api_response(409, [
                     'status'  => 'error',
-                    'message' => "Insufficient variant stock for '{$product['name']}' (Size: {$size}). Available: {$variant['stock']}, Requested: {$quantity}."
+                    'message' => "Insufficient variant stock for '{$product['name']}' ({$variantLabel}). Available: {$variant['stock']}, Requested: {$quantity}."
                 ]);
             }
 
@@ -133,8 +143,11 @@ try {
             if (!empty($variant['sku'])) {
                 $itemSku = $variant['sku'];
             }
+            if (!empty($variant['additional_price'])) {
+                $unitPrice += (float)$variant['additional_price'];
+            }
         } else {
-            // No size specified; check base product stock
+            // No variant specified; check base product stock
             if ((int)$product['stock'] < $quantity) {
                 $db->rollBack();
                 api_response(409, [
@@ -151,6 +164,7 @@ try {
             'product_id'   => $productId,
             'variant_id'   => $variantId,
             'product_name' => $product['name'],
+            'color'        => $color !== '' ? $color : null,
             'size'         => $size !== '' ? $size : null,
             'sku'          => $itemSku,
             'quantity'     => $quantity,
@@ -211,7 +225,11 @@ try {
     $newOrderId = (int)$db->lastInsertId();
 
     // 6. Insert Line Items and Deduct Inventory
-    $itemInsert     = $db->prepare('INSERT INTO order_items (order_id, product_id, product_name, size, sku, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $itemInsert     = $db->prepare('
+        INSERT INTO order_items (
+            order_id, product_id, product_name, color, size, sku, quantity, unit_price, line_total
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ');
     $upVariantStock = $db->prepare('UPDATE product_variants SET stock = stock - ? WHERE id = ?');
     $upProductStock = $db->prepare('UPDATE products SET stock = stock - ? WHERE id = ?');
 
@@ -220,6 +238,7 @@ try {
             $newOrderId,
             $item['product_id'],
             $item['product_name'],
+            $item['color'],
             $item['size'],
             $item['sku'],
             $item['quantity'],

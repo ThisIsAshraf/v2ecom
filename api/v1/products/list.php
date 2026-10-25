@@ -40,6 +40,7 @@ try {
                 p.description, 
                 p.price, 
                 p.compare_price, 
+                p.colors,
                 p.sizes,
                 COALESCE(pi.image_url, p.image_url) AS image_url, 
                 p.stock, 
@@ -62,7 +63,7 @@ try {
 
     $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Attach normalized gallery images, formatted size array, & variants
+    // Attach normalized gallery images, formatted size/color arrays, & variants
     if ($products) {
         $productIds = array_column($products, 'id');
         $inMarks = implode(',', array_fill(0, count($productIds), '?'));
@@ -77,15 +78,15 @@ try {
             $galleryMap[$gRow['product_id']][] = $fullUrl;
         }
 
-        // Fetch product variants
-        $varStmt = $db->prepare("SELECT product_id, sku, size, color, additional_price, stock FROM product_variants WHERE product_id IN ($inMarks) ORDER BY id ASC");
+        // Fetch product variants with Color and Size details
+        $varStmt = $db->prepare("SELECT product_id, sku, color, size, additional_price, stock FROM product_variants WHERE product_id IN ($inMarks) ORDER BY id ASC");
         $varStmt->execute($productIds);
         $variantMap = [];
         foreach ($varStmt->fetchAll(PDO::FETCH_ASSOC) as $vRow) {
             $variantMap[$vRow['product_id']][] = [
                 'sku'              => $vRow['sku'],
-                'size'             => $vRow['size'],
                 'color'            => $vRow['color'],
+                'size'             => $vRow['size'],
                 'additional_price' => (float)$vRow['additional_price'],
                 'stock'            => (int)$vRow['stock'],
                 'in_stock'         => (int)$vRow['stock'] > 0
@@ -101,7 +102,8 @@ try {
             }
 
             // Numeric casting
-            $pItem['price']         = (float)$pItem['price'];
+            $basePrice = (float)$pItem['price'];
+            $pItem['price']         = $basePrice;
             $pItem['compare_price'] = $pItem['compare_price'] !== null ? (float)$pItem['compare_price'] : null;
             $pItem['stock']         = (int)$pItem['stock'];
             $pItem['in_stock']      = $pItem['stock'] > 0;
@@ -109,13 +111,49 @@ try {
             // Direct frontend link
             $pItem['product_url'] = url('product.php?slug=' . urlencode($pItem['slug']));
 
-            // Parsed sizes list
-            $pItem['sizes_list'] = !empty($pItem['sizes'])
+            // Parsed raw lists
+            $rawColors = !empty($pItem['colors'])
+                ? array_values(array_filter(array_map('trim', explode(',', (string)$pItem['colors']))))
+                : [];
+            $rawSizes  = !empty($pItem['sizes'])
                 ? array_values(array_filter(array_map('trim', explode(',', (string)$pItem['sizes']))))
                 : [];
 
+            $variantsList = $variantMap[$pItem['id']] ?? [];
+
+            // Extract unique colors and sizes from active variant matrix
+            $matrixColors = [];
+            $matrixSizes  = [];
+            $maxVariantPrice = $basePrice;
+            $hasPriceDelta = false;
+
+            foreach ($variantsList as $varItem) {
+                if (!empty($varItem['color']) && !in_array($varItem['color'], $matrixColors, true)) {
+                    $matrixColors[] = $varItem['color'];
+                }
+                if (!empty($varItem['size']) && !in_array($varItem['size'], $matrixSizes, true)) {
+                    $matrixSizes[] = $varItem['size'];
+                }
+                if ($varItem['additional_price'] > 0) {
+                    $hasPriceDelta = true;
+                    $calcPrice = $basePrice + $varItem['additional_price'];
+                    if ($calcPrice > $maxVariantPrice) {
+                        $maxVariantPrice = $calcPrice;
+                    }
+                }
+            }
+
+            // Merge matrix values with base strings
+            $pItem['colors_list'] = !empty($matrixColors) ? $matrixColors : $rawColors;
+            $pItem['sizes_list']  = !empty($matrixSizes) ? $matrixSizes : $rawSizes;
+
+            // Price range indicators
+            $pItem['has_variant_pricing'] = $hasPriceDelta;
+            $pItem['min_price']           = $basePrice;
+            $pItem['max_price']           = $maxVariantPrice;
+
             $pItem['gallery_images'] = $galleryMap[$pItem['id']] ?? [];
-            $pItem['variants']       = $variantMap[$pItem['id']] ?? [];
+            $pItem['variants']       = $variantsList;
         }
         unset($pItem);
     }

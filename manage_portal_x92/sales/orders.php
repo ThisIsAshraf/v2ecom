@@ -42,16 +42,19 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $stmt = db()->prepare($exportSql);
     $stmt->execute($params);
 
-    $itemsStmt = db()->prepare('SELECT product_name, size, quantity FROM order_items WHERE order_id = ?');
+    $itemsStmt = db()->prepare('SELECT product_name, color, size, quantity FROM order_items WHERE order_id = ?');
 
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        // Fetch items with size for CSV export
+        // Fetch items with Color & Size for CSV export
         $itemsStmt->execute([$row['id']]);
         $orderLines = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
         $itemSummaries = [];
         foreach ($orderLines as $ol) {
-            $szStr = !empty($ol['size']) ? " [Size: {$ol['size']}]" : '';
-            $itemSummaries[] = "{$ol['product_name']}{$szStr} x{$ol['quantity']}";
+            $variantParts = [];
+            if (!empty($ol['color'])) $variantParts[] = "Color: {$ol['color']}";
+            if (!empty($ol['size']))  $variantParts[] = "Size: {$ol['size']}";
+            $vStr = $variantParts ? ' [' . implode(', ', $variantParts) . ']' : '';
+            $itemSummaries[] = "{$ol['product_name']}{$vStr} x{$ol['quantity']}";
         }
 
         fputcsv($out, [
@@ -120,10 +123,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $linesStmt->execute([$id]);
                 $orderItems = $linesStmt->fetchAll();
 
-                // Append size to display name for email invoices if available
+                // Append Color & Size to display name for email invoices
                 foreach ($orderItems as &$oi) {
+                    $details = [];
+                    if (!empty($oi['color']) && !str_contains($oi['product_name'], 'Color:')) {
+                        $details[] = 'Color: ' . $oi['color'];
+                    }
                     if (!empty($oi['size']) && !str_contains($oi['product_name'], 'Size:')) {
-                        $oi['product_name'] .= ' (Size: ' . $oi['size'] . ')';
+                        $details[] = 'Size: ' . $oi['size'];
+                    }
+                    if (!empty($details)) {
+                        $oi['product_name'] .= ' (' . implode(', ', $details) . ')';
                     }
                 }
                 unset($oi);
@@ -322,11 +332,12 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Line Items Table (Includes Chosen Sizes) -->
+        <!-- Line Items Table (Includes Color and Size Options) -->
         <table class="invoice-table">
             <thead>
                 <tr>
                     <th style="text-align:left; border-top-left-radius:6px;">Item Description</th>
+                    <th style="text-align:center;">Color</th>
                     <th style="text-align:center;">Size</th>
                     <th style="text-align:center;">SKU</th>
                     <th style="text-align:center;">Qty</th>
@@ -339,6 +350,15 @@ $logoUrl = site_setting('logo_url', '');
                     <tr>
                         <td style="font-weight:600; color:#222;">
                             <?= e($l['product_name']) ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <?php if (!empty($l['color'])): ?>
+                                <span style="display:inline-block; background:#e0e7ff; color:#3730a3; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px;">
+                                    <?= e($l['color']) ?>
+                                </span>
+                            <?php else: ?>
+                                <span style="color:#aaa; font-size:12px;">—</span>
+                            <?php endif; ?>
                         </td>
                         <td style="text-align:center;">
                             <?php if (!empty($l['size'])): ?>
