@@ -10,7 +10,7 @@ $phone       = trim((string)($_GET['phone'] ?? ''));
 
 if ($orderId === '' && $orderNumber === '') {
     api_response(400, [
-        'status' => 'error',
+        'status'  => 'error',
         'message' => 'Bad Request: Please provide either order_id or order_number query parameter.'
     ]);
 }
@@ -44,10 +44,15 @@ try {
             o.address, 
             COALESCE(sc.city_name, o.city) AS city, 
             sc.zone_code,
+            o.notes,
             o.payment_method, 
             o.status, 
             o.tracking_number, 
+            o.subtotal,
+            o.discount_amount,
+            o.shipping_amount,
             o.total, 
+            o.coupon_code,
             o.created_at 
         FROM orders o
         LEFT JOIN shipping_cities sc ON sc.id = o.city_id
@@ -62,27 +67,73 @@ try {
 
     if (!$order) {
         api_response(404, [
-            'status' => 'error',
+            'status'  => 'error',
             'message' => 'Order not found.'
         ]);
     }
 
-    // Fetch line items for tracking response
+    // Numeric casting for order totals
+    $order['id']              = (int)$order['id'];
+    $order['subtotal']        = (float)$order['subtotal'];
+    $order['discount_amount'] = (float)$order['discount_amount'];
+    $order['shipping_amount'] = (float)$order['shipping_amount'];
+    $order['total']           = (float)$order['total'];
+
+    // Fetch line items including size and primary cover thumbnail
     $itemsStmt = $db->prepare('
-        SELECT product_id, product_name, sku, quantity, unit_price, line_total 
-        FROM order_items 
-        WHERE order_id = ?
+        SELECT 
+            oi.id,
+            oi.product_id, 
+            oi.product_name, 
+            oi.size,
+            oi.sku, 
+            oi.quantity, 
+            oi.unit_price, 
+            oi.line_total,
+            COALESCE(pi.image_url, p.image_url) AS image_url
+        FROM order_items oi
+        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN product_images pi ON pi.product_id = oi.product_id AND pi.is_primary = 1
+        WHERE oi.order_id = ?
+        ORDER BY oi.id ASC
     ');
     $itemsStmt->execute([$order['id']]);
-    $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $rawItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $formattedItems = [];
+    foreach ($rawItems as $item) {
+        $img = $item['image_url'];
+        $formattedItems[] = [
+            'id'           => (int)$item['id'],
+            'product_id'   => (int)$item['product_id'],
+            'product_name' => $item['product_name'],
+            'size'         => !empty($item['size']) ? $item['size'] : null,
+            'sku'          => $item['sku'],
+            'quantity'     => (int)$item['quantity'],
+            'unit_price'   => (float)$item['unit_price'],
+            'line_total'   => (float)$item['line_total'],
+            'image_url'    => !empty($img) ? (str_starts_with($img, 'http') ? $img : url($img)) : null,
+        ];
+    }
+    $order['items'] = $formattedItems;
+
+    // Fetch chronological tracking status history
+    $historyStmt = $db->prepare('
+        SELECT status, note, created_at 
+        FROM order_status_history 
+        WHERE order_id = ? 
+        ORDER BY id ASC
+    ');
+    $historyStmt->execute([$order['id']]);
+    $order['status_history'] = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 
     api_response(200, [
         'status' => 'success',
-        'data' => $order
+        'data'   => $order
     ]);
 } catch (Throwable $e) {
     api_response(500, [
-        'status' => 'error',
+        'status'  => 'error',
         'message' => 'Database error: ' . $e->getMessage()
     ]);
 }

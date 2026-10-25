@@ -22,7 +22,14 @@ try {
 
     $whereSql = 'WHERE ' . implode(' AND ', $where);
 
-    // Query selecting cover photo from product_images (is_primary = 1) with fallback
+    // Total Count Query for proper pagination metadata
+    $countSql = "SELECT COUNT(*) FROM products p {$whereSql}";
+    $countStmt = $db->prepare($countSql);
+    $countStmt->execute($params);
+    $totalRecords = (int)$countStmt->fetchColumn();
+    $totalPages   = max(1, (int)ceil($totalRecords / $limit));
+
+    // Select product records with cover photo from product_images (is_primary = 1) fallback
     $sql = "SELECT 
                 p.id, 
                 p.category_id, 
@@ -33,6 +40,7 @@ try {
                 p.description, 
                 p.price, 
                 p.compare_price, 
+                p.sizes,
                 COALESCE(pi.image_url, p.image_url) AS image_url, 
                 p.stock, 
                 p.created_at 
@@ -54,21 +62,23 @@ try {
 
     $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Attach normalized product gallery images & size/color variants
+    // Attach normalized gallery images, formatted size array, & variants
     if ($products) {
         $productIds = array_column($products, 'id');
         $inMarks = implode(',', array_fill(0, count($productIds), '?'));
 
         // Fetch gallery photos
-        $galStmt = $db->prepare("SELECT product_id, image_url FROM product_images WHERE product_id IN ($inMarks)");
+        $galStmt = $db->prepare("SELECT product_id, image_url FROM product_images WHERE product_id IN ($inMarks) ORDER BY is_primary DESC, id ASC");
         $galStmt->execute($productIds);
         $galleryMap = [];
         foreach ($galStmt->fetchAll(PDO::FETCH_ASSOC) as $gRow) {
-            $galleryMap[$gRow['product_id']][] = $gRow['image_url'];
+            $rawImg = $gRow['image_url'];
+            $fullUrl = (str_starts_with($rawImg, 'http://') || str_starts_with($rawImg, 'https://')) ? $rawImg : url($rawImg);
+            $galleryMap[$gRow['product_id']][] = $fullUrl;
         }
 
         // Fetch product variants
-        $varStmt = $db->prepare("SELECT product_id, sku, size, color, additional_price, stock FROM product_variants WHERE product_id IN ($inMarks)");
+        $varStmt = $db->prepare("SELECT product_id, sku, size, color, additional_price, stock FROM product_variants WHERE product_id IN ($inMarks) ORDER BY id ASC");
         $varStmt->execute($productIds);
         $variantMap = [];
         foreach ($varStmt->fetchAll(PDO::FETCH_ASSOC) as $vRow) {
@@ -78,11 +88,32 @@ try {
                 'color'            => $vRow['color'],
                 'additional_price' => (float)$vRow['additional_price'],
                 'stock'            => (int)$vRow['stock'],
+                'in_stock'         => (int)$vRow['stock'] > 0
             ];
         }
 
-        // Map back to products
+        // Format each product object
         foreach ($products as &$pItem) {
+            // Full image URL
+            if (!empty($pItem['image_url'])) {
+                $rawCover = $pItem['image_url'];
+                $pItem['image_url'] = (str_starts_with($rawCover, 'http://') || str_starts_with($rawCover, 'https://')) ? $rawCover : url($rawCover);
+            }
+
+            // Numeric casting
+            $pItem['price']         = (float)$pItem['price'];
+            $pItem['compare_price'] = $pItem['compare_price'] !== null ? (float)$pItem['compare_price'] : null;
+            $pItem['stock']         = (int)$pItem['stock'];
+            $pItem['in_stock']      = $pItem['stock'] > 0;
+
+            // Direct frontend link
+            $pItem['product_url'] = url('product.php?slug=' . urlencode($pItem['slug']));
+
+            // Parsed sizes list
+            $pItem['sizes_list'] = !empty($pItem['sizes'])
+                ? array_values(array_filter(array_map('trim', explode(',', (string)$pItem['sizes']))))
+                : [];
+
             $pItem['gallery_images'] = $galleryMap[$pItem['id']] ?? [];
             $pItem['variants']       = $variantMap[$pItem['id']] ?? [];
         }
@@ -92,9 +123,11 @@ try {
     api_response(200, [
         'status' => 'success',
         'pagination' => [
-            'page'  => $page,
-            'limit' => $limit,
-            'count' => count($products)
+            'page'        => $page,
+            'limit'       => $limit,
+            'total'       => $totalRecords,
+            'total_pages' => $totalPages,
+            'count'       => count($products)
         ],
         'data' => $products
     ]);
