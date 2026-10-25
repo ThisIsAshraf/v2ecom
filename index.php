@@ -10,11 +10,11 @@ $sort = trim((string)($_GET['sort'] ?? 'latest'));
 $sql = 'SELECT 
             p.*, 
             c.name category_name, 
-            c.slug category_slug,
+            c.slug category_slug, 
             COALESCE(pi.image_url, p.image_url) AS cover_image 
         FROM products p 
         LEFT JOIN categories c ON c.id = p.category_id 
-        LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+        LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1 
         WHERE p.active = 1';
 $args = [];
 
@@ -60,6 +60,9 @@ $products = $st->fetchAll();
 // Dynamic Hero Banner Slides & Testimonials
 $slides = db()->query('SELECT * FROM hero_slides WHERE active=1 ORDER BY sort_order ASC, id DESC')->fetchAll();
 $testimonials = db()->query('SELECT * FROM testimonials WHERE active=1 ORDER BY sort_order ASC, id DESC')->fetchAll();
+
+// Fetch Active Social Media Feed Cards
+$socialFeed = db()->query('SELECT * FROM social_links WHERE active=1 ORDER BY sort_order ASC, id DESC LIMIT 8')->fetchAll();
 
 // Categories with Active Product Count
 $categories = db()->query('
@@ -313,6 +316,73 @@ require_once __DIR__ . '/app/header.php';
     .action-btn:hover {
         background: var(--accent-hover);
     }
+
+    /* Fixed & Centered Social Feed Cards */
+    .social-feed-container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 18px;
+        margin: 0 auto;
+        max-width: 1150px;
+    }
+
+    .social-feed-card {
+        position: relative;
+        border-radius: 14px;
+        overflow: hidden;
+        width: 220px;
+        max-width: 100%;
+        aspect-ratio: 1 / 1;
+        background: #f7f7f7;
+        border: 1px solid #eee;
+        display: block;
+        text-decoration: none;
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
+        transition: transform 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .social-feed-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 12px 25px rgba(0, 0, 0, 0.14);
+    }
+
+    .social-feed-card img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.4s ease;
+    }
+
+    .social-feed-card:hover img {
+        transform: scale(1.08);
+    }
+
+    .social-feed-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.72) 100%);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 14px;
+        box-sizing: border-box;
+    }
+
+    .social-badge {
+        align-self: flex-start;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 5px;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
 </style>
 
 <!-- Hero Slider -->
@@ -489,9 +559,36 @@ require_once __DIR__ . '/app/header.php';
     </div>
 <?php endif; ?>
 
+<!-- Social Media Feed Section -->
+<?php if (!empty($socialFeed) && $q === '' && $cat === ''): ?>
+    <section style="margin: 60px 0 35px 0;">
+        <div style="text-align: center; margin-bottom: 25px;">
+            <div style="text-transform: uppercase; font-size: 12px; letter-spacing: 1.5px; color: #888;">Follow Our Journey</div>
+            <h2 style="font-size: 28px; margin: 4px 0 0 0; color: #111;">On the 'Gram & Beyond</h2>
+            <p class="muted small" style="margin-top: 5px;">Tag us in your fits to get featured</p>
+        </div>
+
+        <div class="social-feed-container">
+            <?php foreach ($socialFeed as $sf):
+                $sfImg = !empty($sf['image_url']) ? (str_starts_with($sf['image_url'], 'http') ? $sf['image_url'] : url($sf['image_url'])) : 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=600';
+            ?>
+                <a class="social-feed-card" href="<?= e($sf['post_url']) ?>" target="_blank" rel="noopener">
+                    <img loading="lazy" src="<?= e($sfImg) ?>" alt="<?= e($sf['title'] ?: $sf['platform']) ?>">
+                    <div class="social-feed-overlay">
+                        <span class="social-badge"><?= e($sf['platform']) ?></span>
+                        <?php if (!empty($sf['title'])): ?>
+                            <span style="font-size: 13px; font-weight: 600; line-height: 1.3; text-shadow: 0 1px 3px rgba(0,0,0,0.8);"><?= e($sf['title']) ?> ↗</span>
+                        <?php endif; ?>
+                    </div>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    </section>
+<?php endif; ?>
+
 <!-- Testimonials -->
 <?php if ($testimonials): ?>
-    <section style="margin: 70px 0 30px 0; background: #fff; padding: 45px 30px; border-radius: 16px; border: 1px solid #eee;">
+    <section style="margin: 50px 0 30px 0; background: #fff; padding: 45px 30px; border-radius: 16px; border: 1px solid #eee;">
         <div style="text-align: center; margin-bottom: 35px;">
             <div style="text-transform: uppercase; font-size: 12px; letter-spacing: 1.5px; color: #888;">Community Feedback</div>
             <h2 style="font-size:32px; margin-top:4px;">Loved By Our Customers</h2>

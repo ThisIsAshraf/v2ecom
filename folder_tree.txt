@@ -67,6 +67,7 @@ v2ecom
 │   │   │   ├── dafa40cbab10cc9fcd6d238543c9753377f442
 │   │   │   └── ef4b32f160cd788b69bb35510713d5197dc6e3
 │   │   ├── 6b
+│   │   │   ├── d14fbee79d22281fb401f205a66e295de0e3f7
 │   │   │   └── e19adc258fa9eaf7764e635022d09737e31304
 │   │   ├── 07
 │   │   │   └── 2b6272b26197a3426cc286551e2525c8d8bf6c
@@ -91,11 +92,14 @@ v2ecom
 │   │   │   └── 85bfb7a350371373da7ab14fb5f6139da4ab46
 │   │   ├── 9f
 │   │   │   ├── 7b99ba2fae57b15fec1e01a541926d4c05ed6d
+│   │   │   ├── 642562a35c2542bc257acf22526560cbd93c1c
 │   │   │   └── a0cf08a1e5e03f57e2d974aede91ea47b4683e
 │   │   ├── 11
 │   │   │   └── 9a064b74f7bb1c794bd39596b1fb4a76ea7a73
 │   │   ├── 12
 │   │   │   └── 8e34cd627fe8f177775b4b4cb1cba7fff362d2
+│   │   ├── 18
+│   │   │   └── bc0987a437c87257f18244fcb76e06d5f059dc
 │   │   ├── 19
 │   │   │   ├── 65060f0ac062eab3efa4650c35f551c61cec25
 │   │   │   └── bcb6e050776f2807d0d692a4cdb8ed18912a62
@@ -155,6 +159,8 @@ v2ecom
 │   │   │   └── 9689be8dcab5262db628ca21cb096fc1c81e24
 │   │   ├── 76
 │   │   │   └── 940cac228ee40442901e30a0345877ace9bf4a
+│   │   ├── 77
+│   │   │   └── 98885be82f5e3103118051f34314ca18c7cd6d
 │   │   ├── 78
 │   │   │   └── 1a6271c049197531340df90f27a71e07b01e4c
 │   │   ├── 79
@@ -226,7 +232,8 @@ v2ecom
 │   │   │   ├── 0836f6b54a2a83722812307706f1f3f4497dc0
 │   │   │   └── f1b197ea3eb4061d4c77a02f89c780a092b4ee
 │   │   ├── cf
-│   │   │   └── 3bc3270873291bc9435b2ca21d719498cc5d1f
+│   │   │   ├── 3bc3270873291bc9435b2ca21d719498cc5d1f
+│   │   │   └── f9cc4af06330cdbeb74b967094f29af196788b
 │   │   ├── d3
 │   │   │   ├── 3708f9a3708de698b1ab8f30ce278be85a058f
 │   │   │   └── a9f1ca60d9ff9bc87035e0e99c0e136e627414
@@ -243,6 +250,8 @@ v2ecom
 │   │   ├── e3
 │   │   │   ├── 3dae6d7a245dcf99c3d343564a975557d00ec8
 │   │   │   └── 459c66aed3868012197db9c80669bbc1306d27
+│   │   ├── e8
+│   │   │   └── b2902621cb84caee89c0ca6b8c3c452aeb793f
 │   │   ├── ea
 │   │   │   └── 3d6560a32ab095451fde33e1b9f412f6d4afab
 │   │   ├── ec
@@ -333,6 +342,11 @@ v2ecom
 │   ├── index.php
 │   └── _init.php
 ├── uploads
+│   ├── hero_1792838645_79d3d2.png
+│   ├── hero_1792838662_a89258.jpg
+│   ├── logo-4708273a2daeb808efabf7b5.png
+│   ├── social_1792838866_44c724.png
+│   └── social_1792839695_9087e7.png
 ├── vendor
 │   ├── composer
 │   │   ├── autoload_classmap.php
@@ -437,6 +451,7 @@ v2ecom
 ├── composer.json
 ├── composer.lock
 ├── contact.php
+├── folder_tree.txt
 ├── generate_tree.php
 ├── index.php
 ├── order-success.php
