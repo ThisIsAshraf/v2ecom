@@ -35,7 +35,12 @@ $gs = db()->prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY 
 $gs->execute([$product['id']]);
 $gallery = $gs->fetchAll();
 
-// Fetch normalized product variants (sizes/colors)
+// Extract sizes from the products table (e.g., "S,M,L,XL")
+$productSizes = !empty($product['sizes'])
+    ? array_filter(array_map('trim', explode(',', (string)$product['sizes'])))
+    : [];
+
+// Fetch normalized product variants if table is populated
 $vs = db()->prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY id ASC');
 $vs->execute([$product['id']]);
 $variants = $vs->fetchAll();
@@ -45,24 +50,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
     verify_csrf();
     $qty = max(1, (int)($_POST['qty'] ?? 1));
     $variantId = (int)($_POST['variant_id'] ?? 0);
+    $selectedSize = trim((string)($_POST['size'] ?? ''));
+
+    // Validation: enforce size selection if the product has sizes configured
+    if (!empty($productSizes) && $selectedSize === '') {
+        flash('error', 'Please choose a size before adding this product to your bag.');
+        redirect('products.php?slug=' . urlencode($slug));
+    }
 
     $availableStock = (int)$product['stock'];
 
-    // Check variant stock if a variant was selected
+    // Check variant stock if an explicit variant ID was submitted
     if ($variantId > 0) {
         $vCheck = db()->prepare('SELECT * FROM product_variants WHERE id = ? AND product_id = ?');
         $vCheck->execute([$variantId, $product['id']]);
         $vData = $vCheck->fetch();
         if ($vData) {
             $availableStock = (int)$vData['stock'];
+            if (empty($selectedSize) && !empty($vData['size'])) {
+                $selectedSize = $vData['size'];
+            }
         }
     }
 
     if ($qty > $availableStock) {
         flash('error', 'Only ' . $availableStock . ' units available in stock.');
     } else {
-        $_SESSION['cart'][$product['id']] = ($_SESSION['cart'][$product['id']] ?? 0) + $qty;
-        flash('success', $product['name'] . ' added to your bag.');
+        if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
+            $_SESSION['cart'] = [];
+        }
+
+        // Generate compound cart key: e.g. "12_M" or "12" if no size applies
+        $cartKey = $selectedSize !== '' ? ($product['id'] . '_' . $selectedSize) : (string)$product['id'];
+
+        if (isset($_SESSION['cart'][$cartKey])) {
+            if (is_array($_SESSION['cart'][$cartKey])) {
+                $_SESSION['cart'][$cartKey]['qty'] += $qty;
+            } else {
+                $_SESSION['cart'][$cartKey] = [
+                    'product_id' => (int)$product['id'],
+                    'qty'        => ((int)$_SESSION['cart'][$cartKey]) + $qty,
+                    'size'       => $selectedSize,
+                ];
+            }
+        } else {
+            $_SESSION['cart'][$cartKey] = [
+                'product_id' => (int)$product['id'],
+                'qty'        => $qty,
+                'size'       => $selectedSize,
+            ];
+        }
+
+        $sizeNote = $selectedSize !== '' ? ' (Size: ' . $selectedSize . ')' : '';
+        flash('success', $product['name'] . $sizeNote . ' added to your bag.');
         redirect('cart.php');
     }
 }
@@ -118,11 +158,31 @@ $mainImg = !empty($product['cover_image'])
         </div>
 
         <?php if ((int)$product['stock'] > 0): ?>
-            <form method="post" style="margin-bottom:24px; max-width:320px;">
+            <form method="post" style="margin-bottom:24px; max-width:360px;" id="addToBagForm">
                 <?= csrf_field() ?>
 
-                <!-- Product Variants Selector (Sizes & Colors) -->
-                <?php if ($variants): ?>
+                <!-- Direct Size Selector (Pill Buttons) -->
+                <?php if (!empty($productSizes)): ?>
+                    <div class="field" style="margin-bottom:18px;">
+                        <label style="font-weight:bold; font-size:13px; display:flex; justify-content:space-between; margin-bottom:8px;">
+                            <span>Select Size <span style="color:#e11d48;">*</span></span>
+                            <span id="selectedSizeLabel" style="font-weight:normal; color:#64748b;">Choose size</span>
+                        </label>
+                        <input type="hidden" name="size" id="selectedSizeInput" value="" required>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <?php foreach ($productSizes as $sz): ?>
+                                <button type="button"
+                                    class="size-pill-btn"
+                                    data-size="<?= e($sz) ?>"
+                                    onclick="selectProductSize(this, '<?= e(addslashes($sz)) ?>')"
+                                    style="background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:8px 16px; font-weight:600; font-size:13px; cursor:pointer; min-width:44px; text-align:center; transition:all 0.15s ease;">
+                                    <?= e($sz) ?>
+                                </button>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                <?php elseif ($variants): ?>
+                    <!-- Fallback: Product Variants Selector (Sizes & Colors) -->
                     <div class="field" style="margin-bottom:15px;">
                         <label style="font-weight:bold; font-size:13px; display:block; margin-bottom:6px;">Select Size / Color *</label>
                         <select name="variant_id" required style="padding:10px; width:100%; border-radius:6px; border:1px solid #ccc;">
@@ -152,7 +212,7 @@ $mainImg = !empty($product['cover_image'])
     </div>
 </div>
 
-<!-- Interactive Thumbnail Switching Script -->
+<!-- Interactive Scripts -->
 <script>
     function switchImage(thumbEl) {
         document.getElementById('mainProductImg').src = thumbEl.src;
@@ -160,6 +220,19 @@ $mainImg = !empty($product['cover_image'])
             el.style.border = '1px solid #ddd';
         });
         thumbEl.style.border = '2px solid var(--accent, #333)';
+    }
+
+    function selectProductSize(btnEl, size) {
+        document.getElementById('selectedSizeInput').value = size;
+        document.getElementById('selectedSizeLabel').textContent = 'Selected: ' + size;
+        document.querySelectorAll('.size-pill-btn').forEach(b => {
+            b.style.background = '#fff';
+            b.style.color = '#000';
+            b.style.borderColor = '#cbd5e1';
+        });
+        btnEl.style.background = '#0f172a';
+        btnEl.style.color = '#ffffff';
+        btnEl.style.borderColor = '#0f172a';
     }
 </script>
 

@@ -1,41 +1,133 @@
 <?php
 require_once __DIR__ . '/app/bootstrap.php';
 
-// Handle Cart Actions (Add to Bag & Quantity Updates)
+// Helper to resolve cart items regardless of session storage format
+function get_detailed_cart_items(): array
+{
+    $cart = $_SESSION['cart'] ?? [];
+    if (!is_array($cart) || empty($cart)) {
+        return [];
+    }
+
+    $productIds = [];
+    $rawItems = [];
+
+    foreach ($cart as $key => $item) {
+        $pId = 0;
+        $qty = 0;
+        $size = '';
+
+        if (is_array($item)) {
+            $pId = (int)($item['product_id'] ?? 0);
+            $qty = max(0, (int)($item['qty'] ?? 0));
+            $size = trim((string)($item['size'] ?? ''));
+        } else {
+            // Legacy format fallback: key is product_id, value is qty
+            $pId = (int)$key;
+            $qty = max(0, (int)$item);
+        }
+
+        if ($pId > 0 && $qty > 0) {
+            $productIds[] = $pId;
+            $rawItems[] = [
+                'cart_key'   => (string)$key,
+                'product_id' => $pId,
+                'qty'        => $qty,
+                'size'       => $size
+            ];
+        }
+    }
+
+    if (empty($productIds)) {
+        return [];
+    }
+
+    $productIds = array_unique($productIds);
+    $inMarks = implode(',', array_fill(0, count($productIds), '?'));
+    $stmt = db()->prepare("
+        SELECT p.*, COALESCE(pi.image_url, p.image_url) AS cover_image 
+        FROM products p 
+        LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1 
+        WHERE p.id IN ($inMarks)
+    ");
+    $stmt->execute(array_values($productIds));
+    $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $prodMap = [];
+    foreach ($prods as $p) {
+        $prodMap[$p['id']] = $p;
+    }
+
+    $items = [];
+    foreach ($rawItems as $r) {
+        $pId = $r['product_id'];
+        if (!isset($prodMap[$pId])) {
+            continue;
+        }
+
+        $p = $prodMap[$pId];
+        $price = (float)$p['price'];
+        $qty = $r['qty'];
+        $cover = $p['cover_image'] ?? $p['image_url'];
+
+        $imgUrl = $cover
+            ? (str_starts_with($cover, 'http') ? $cover : url($cover))
+            : 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=800';
+
+        $items[] = [
+            'cart_key'   => $r['cart_key'],
+            'id'         => $p['id'],
+            'name'       => $p['name'],
+            'slug'       => $p['slug'],
+            'price'      => $price,
+            'qty'        => $qty,
+            'stock'      => (int)$p['stock'],
+            'size'       => $r['size'],
+            'image_url'  => $imgUrl,
+            'line_total' => $price * $qty
+        ];
+    }
+
+    return $items;
+}
+
+// Handle Cart Actions (Quantity Updates)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string)($_POST['action'] ?? '');
 
-    if ($action === 'add') {
-        $id  = (int)($_POST['product_id'] ?? 0);
-        $qty = max(1, min(10, (int)($_POST['quantity'] ?? 1)));
-
-        $s = db()->prepare('SELECT stock, active FROM products WHERE id = ?');
-        $s->execute([$id]);
-        $p = $s->fetch();
-
-        if ($p && $p['active'] && (int)$p['stock'] > 0) {
-            $_SESSION['cart'][$id] = min((int)$p['stock'], (int)($_SESSION['cart'][$id] ?? 0) + $qty);
-            flash('success', 'Added to your bag.');
-        } else {
-            flash('error', 'This product is unavailable.');
-        }
-    } elseif ($action === 'update') {
-        foreach (($_POST['qty'] ?? []) as $id => $qty) {
-            $id  = (int)$id;
+    if ($action === 'update') {
+        foreach (($_POST['qty'] ?? []) as $key => $qty) {
+            $key = (string)$key;
             $qty = (int)$qty;
 
             if ($qty <= 0) {
-                unset($_SESSION['cart'][$id]);
+                unset($_SESSION['cart'][$key]);
             } else {
-                $s = db()->prepare('SELECT stock FROM products WHERE id = ?');
-                $s->execute([$id]);
-                $stock = (int)$s->fetchColumn();
+                if (isset($_SESSION['cart'][$key])) {
+                    if (is_array($_SESSION['cart'][$key])) {
+                        $pId = (int)($_SESSION['cart'][$key]['product_id'] ?? 0);
+                        $s = db()->prepare('SELECT stock FROM products WHERE id = ?');
+                        $s->execute([$pId]);
+                        $stock = (int)$s->fetchColumn();
 
-                if ($stock > 0) {
-                    $_SESSION['cart'][$id] = min($stock, $qty);
-                } else {
-                    unset($_SESSION['cart'][$id]);
+                        if ($stock > 0) {
+                            $_SESSION['cart'][$key]['qty'] = min($stock, $qty);
+                        } else {
+                            unset($_SESSION['cart'][$key]);
+                        }
+                    } else {
+                        $pId = (int)$key;
+                        $s = db()->prepare('SELECT stock FROM products WHERE id = ?');
+                        $s->execute([$pId]);
+                        $stock = (int)$s->fetchColumn();
+
+                        if ($stock > 0) {
+                            $_SESSION['cart'][$key] = min($stock, $qty);
+                        } else {
+                            unset($_SESSION['cart'][$key]);
+                        }
+                    }
                 }
             }
         }
@@ -44,32 +136,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('cart.php');
 }
 
-$items    = cart_items();
-$subtotal = cart_subtotal($items);
-
-// Fetch Normalized Cover Images for Cart Items
-if ($items) {
-    $itemIds = array_column($items, 'id');
-    $inMarks = implode(',', array_fill(0, count($itemIds), '?'));
-
-    $imgStmt = db()->prepare("
-        SELECT p.id, COALESCE(pi.image_url, p.image_url) AS cover_image 
-        FROM products p 
-        LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1 
-        WHERE p.id IN ($inMarks)
-    ");
-    $imgStmt->execute($itemIds);
-    $imgMap = $imgStmt->fetchAll(PDO::FETCH_KEY_PAIR);
-
-    foreach ($items as &$item) {
-        $cover = $imgMap[$item['id']] ?? $item['image_url'];
-        if ($cover) {
-            $item['image_url'] = str_starts_with($cover, 'http') ? $cover : url($cover);
-        } else {
-            $item['image_url'] = 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=800';
-        }
-    }
-    unset($item);
+$items = get_detailed_cart_items();
+$subtotal = 0;
+foreach ($items as $it) {
+    $subtotal += $it['line_total'];
 }
 
 $pageTitle = 'Your bag';
@@ -105,14 +175,21 @@ require_once __DIR__ . '/app/header.php';
                             <td>
                                 <div style="display:flex; align-items:center; gap:12px">
                                     <img src="<?= e($i['image_url']) ?>" alt="<?= e($i['name']) ?>" style="width:65px; height:75px; object-fit:cover; border-radius:4px; border:1px solid #eee;">
-                                    <a href="<?= e(url('product.php?slug=' . urlencode($i['slug']))) ?>" style="text-decoration:none; font-weight:bold; color:inherit;">
-                                        <?= e($i['name']) ?>
-                                    </a>
+                                    <div>
+                                        <a href="<?= e(url('products.php?slug=' . urlencode($i['slug']))) ?>" style="text-decoration:none; font-weight:bold; color:inherit; display:block;">
+                                            <?= e($i['name']) ?>
+                                        </a>
+                                        <?php if (!empty($i['size'])): ?>
+                                            <span style="display:inline-block; margin-top:4px; background:#0f172a; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px;">
+                                                Size: <?= e($i['size']) ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
                                 </div>
                             </td>
                             <td><?= money($i['price']) ?></td>
                             <td>
-                                <input style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;" type="number" min="0" max="<?= max(1, (int)$i['stock']) ?>" name="qty[<?= (int)$i['id'] ?>]" value="<?= (int)$i['qty'] ?>">
+                                <input style="width:80px; padding:6px; border-radius:4px; border:1px solid #ccc;" type="number" min="0" max="<?= max(1, (int)$i['stock']) ?>" name="qty[<?= e($i['cart_key']) ?>]" value="<?= (int)$i['qty'] ?>">
                             </td>
                             <td><b><?= money($i['line_total']) ?></b></td>
                         </tr>

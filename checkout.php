@@ -1,10 +1,96 @@
 <?php require_once __DIR__ . '/app/bootstrap.php';
-$items = cart_items();
+
+// Helper to ensure item sizes are properly loaded from the session cart
+function resolve_checkout_items(): array
+{
+    $cart = $_SESSION['cart'] ?? [];
+    if (!is_array($cart) || empty($cart)) {
+        return [];
+    }
+
+    $productIds = [];
+    $rawItems = [];
+
+    foreach ($cart as $key => $item) {
+        $pId = 0;
+        $qty = 0;
+        $size = '';
+
+        if (is_array($item)) {
+            $pId = (int)($item['product_id'] ?? 0);
+            $qty = max(0, (int)($item['qty'] ?? 0));
+            $size = trim((string)($item['size'] ?? ''));
+        } else {
+            $pId = (int)$key;
+            $qty = max(0, (int)$item);
+        }
+
+        if ($pId > 0 && $qty > 0) {
+            $productIds[] = $pId;
+            $rawItems[] = [
+                'cart_key'   => (string)$key,
+                'product_id' => $pId,
+                'qty'        => $qty,
+                'size'       => $size
+            ];
+        }
+    }
+
+    if (empty($productIds)) {
+        return [];
+    }
+
+    $productIds = array_unique($productIds);
+    $inMarks = implode(',', array_fill(0, count($productIds), '?'));
+    $stmt = db()->prepare("SELECT * FROM products WHERE id IN ($inMarks)");
+    $stmt->execute(array_values($productIds));
+    $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $prodMap = [];
+    foreach ($prods as $p) {
+        $prodMap[$p['id']] = $p;
+    }
+
+    $items = [];
+    foreach ($rawItems as $r) {
+        $pId = $r['product_id'];
+        if (!isset($prodMap[$pId])) {
+            continue;
+        }
+
+        $p = $prodMap[$pId];
+        $price = (float)$p['price'];
+        $qty = $r['qty'];
+
+        $items[] = [
+            'cart_key'   => $r['cart_key'],
+            'id'         => $p['id'],
+            'name'       => $p['name'],
+            'slug'       => $p['slug'],
+            'sku'        => $p['sku'] ?? null,
+            'price'      => $price,
+            'qty'        => $qty,
+            'stock'      => (int)$p['stock'],
+            'active'     => (int)$p['active'],
+            'size'       => $r['size'],
+            'line_total' => $price * $qty
+        ];
+    }
+
+    return $items;
+}
+
+$items = resolve_checkout_items();
 if (!$items) {
     flash('error', 'Your bag is empty.');
     redirect('cart.php');
 }
-$subtotal = cart_subtotal($items);
+
+$subtotal = 0;
+foreach ($items as $i) {
+    $subtotal += $i['line_total'];
+}
+
 $errors = [];
 $couponCode = (string)($_SESSION['coupon_code'] ?? '');
 $discount = 0;
@@ -13,7 +99,7 @@ $coupon = null;
 // Fetch Normalized Shipping Cities
 $cities = db()->query('SELECT * FROM shipping_cities ORDER BY zone_code ASC, city_name ASC')->fetchAll();
 
-// Check if customer is logged in to pre-fill saved details from customer_addresses
+// Check if customer is logged in to pre-fill saved details
 $u = function_exists('current_user') ? current_user() : null;
 $savedAddress = null;
 
@@ -58,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('checkout.php');
     }
 
-    // 2. Only Process Order Placement if "place_order" action button was pressed
+    // 2. Process Order Placement
     if (isset($_POST['place_order'])) {
         $name    = trim((string)($_POST['customer_name'] ?? ''));
         $email   = trim((string)($_POST['customer_email'] ?? ''));
@@ -79,14 +165,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$cityObj) $errors[] = 'Please select a valid delivery city.';
 
         foreach ($items as $i) {
-            $s = db()->prepare('SELECT stock,active FROM products WHERE id=?');
+            $s = db()->prepare('SELECT stock, active FROM products WHERE id=?');
             $s->execute([$i['id']]);
             $live = $s->fetch();
-            if (!$live || !$live['active'] || (int)$live['stock'] < (int)$i['qty']) $errors[] = 'Stock changed for ' . $i['name'] . '. Please update your bag.';
+            if (!$live || !$live['active'] || (int)$live['stock'] < (int)$i['qty']) {
+                $errors[] = 'Stock changed for ' . $i['name'] . '. Please update your bag.';
+            }
         }
 
         if (!$errors) {
-            $subtotal = cart_subtotal($items);
             $coupon = null;
             $discount = 0;
             $code = (string)($_SESSION['coupon_code'] ?? '');
@@ -98,14 +185,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $discount = $coupon['discount_type'] === 'percent' ? $subtotal * (float)$coupon['discount_value'] / 100 : (float)$coupon['discount_value'];
                     $discount = min($subtotal, $discount);
                     if ($coupon['max_discount'] !== null) $discount = min($discount, (float)$coupon['max_discount']);
-                } else $coupon = null;
+                } else {
+                    $coupon = null;
+                }
             }
 
             $shipping = (float)$cityObj['shipping_cost'];
             $total = max(0, $subtotal - $discount) + $shipping;
             $orderNo = 'DVBD' . date('ymd') . strtoupper(bin2hex(random_bytes(3)));
-
-            // Generate a unique tracking code for internal & API tracking
             $trackingNumber = 'TRK-' . strtoupper(bin2hex(random_bytes(4)));
 
             try {
@@ -114,13 +201,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $userId = $u['id'] ?? null;
 
-                // 1. Save Normalized Address Record
+                // 1. Save Address Record
                 $addrStmt = $pdo->prepare('INSERT INTO customer_addresses (user_id, full_name, phone, street_address, city_id, is_default) VALUES (?, ?, ?, ?, ?, 1)');
                 $addrStmt->execute([$userId, $name, $phone, $address, $cityId]);
                 $addressId = (int)$pdo->lastInsertId();
 
-                // 2. Insert Normalized Order Record
-                $ins = $pdo->prepare('INSERT INTO orders (user_id, order_number, customer_name, customer_email, customer_phone, address, shipping_address_id, city, city_id, notes, payment_method, status, subtotal, discount_amount, shipping_amount, total, coupon_code, coupon_id, tracking_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                // 2. Insert Order Record
+                $ins = $pdo->prepare('
+                    INSERT INTO orders (
+                        user_id, order_number, customer_name, customer_email, customer_phone, 
+                        address, shipping_address_id, city, city_id, notes, payment_method, 
+                        status, subtotal, discount_amount, shipping_amount, total, 
+                        coupon_code, coupon_id, tracking_number
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ');
                 $ins->execute([
                     $userId,
                     $orderNo,
@@ -144,14 +238,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $orderId = (int)$pdo->lastInsertId();
 
-                // 3. Line Items & Inventory Updates
-                $line = $pdo->prepare('INSERT INTO order_items (order_id, product_id, product_name, sku, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                // 3. Line Items & Inventory Updates (Includes size persistence)
+                $line = $pdo->prepare('
+                    INSERT INTO order_items (order_id, product_id, size, product_name, sku, quantity, unit_price, line_total) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ');
                 $stockUpdate = $pdo->prepare('UPDATE products SET stock=stock-? WHERE id=? AND stock>=?');
 
                 foreach ($items as $i) {
                     $stockUpdate->execute([$i['qty'], $i['id'], $i['qty']]);
-                    if ($stockUpdate->rowCount() !== 1) throw new RuntimeException('Inventory changed during checkout.');
-                    $line->execute([$orderId, $i['id'], $i['name'], $i['sku'] ?? null, $i['qty'], $i['price'], $i['line_total']]);
+                    if ($stockUpdate->rowCount() !== 1) {
+                        throw new RuntimeException('Inventory changed during checkout.');
+                    }
+                    $line->execute([
+                        $orderId,
+                        $i['id'],
+                        $i['size'] ?: null,
+                        $i['name'],
+                        $i['sku'] ?? null,
+                        $i['qty'],
+                        $i['price'],
+                        $i['line_total']
+                    ]);
                 }
 
                 $pdo->prepare('INSERT INTO order_status_history (order_id, status, note) VALUES (?, ?, ?)')->execute([$orderId, 'pending', 'Order placed by customer']);
@@ -169,15 +277,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $s->execute([$orderId]);
                 $order = $s->fetch();
 
-                $s = $pdo->prepare('SELECT product_name name, quantity, unit_price price, line_total FROM order_items WHERE order_id=?');
+                $s = $pdo->prepare('SELECT product_name name, size, quantity, unit_price price, line_total FROM order_items WHERE order_id=?');
                 $s->execute([$orderId]);
                 $mailItems = $s->fetchAll();
 
-                // 1. Send Order Confirmation Receipt to Customer
-                email_customer_order_placed($order, $mailItems);
+                // Format item names to include sizes for emails
+                foreach ($mailItems as &$mi) {
+                    if (!empty($mi['size'])) {
+                        $mi['name'] .= ' (Size: ' . $mi['size'] . ')';
+                    }
+                }
+                unset($mi);
 
-                // 2. Send New Order Alert to Admin
-                email_admin_new_order($order, $mailItems);
+                // Notifications
+                if (function_exists('email_customer_order_placed')) {
+                    email_customer_order_placed($order, $mailItems);
+                }
+                if (function_exists('email_admin_new_order')) {
+                    email_admin_new_order($order, $mailItems);
+                }
 
                 $_SESSION['last_order_number'] = $orderNo;
                 unset($_SESSION['cart'], $_SESSION['coupon_code']);
@@ -249,22 +367,36 @@ require_once __DIR__ . '/app/header.php'; ?>
         <div class="notice success">Payment method: <b>Cash on delivery</b>. Pay the delivery person when your order arrives.</div>
         <button name="place_order" value="1" style="width:100%">Place order · <?= money(max(0, $subtotal - $discount) + $shippingFee) ?></button>
     </form>
+
     <aside class="panel">
         <h2>Order summary</h2>
         <?php foreach ($items as $i): ?>
-            <div style="display:flex;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)"><span><?= e($i['name']) ?> × <?= (int)$i['qty'] ?></span><b><?= money($i['line_total']) ?></b></div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:12px 0; border-bottom:1px solid var(--line);">
+                <div>
+                    <span style="font-weight:600;"><?= e($i['name']) ?> × <?= (int)$i['qty'] ?></span>
+                    <?php if (!empty($i['size'])): ?>
+                        <span style="display:block; margin-top:3px; background:#0f172a; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; width:fit-content;">
+                            Size: <?= e($i['size']) ?>
+                        </span>
+                    <?php endif; ?>
+                </div>
+                <b><?= money($i['line_total']) ?></b>
+            </div>
         <?php endforeach; ?>
+
         <form method="post" style="margin:18px 0">
             <?= csrf_field() ?>
             <div class="field"><label>Discount code</label><input name="coupon_code" placeholder="Enter coupon" value="<?= e((string)($coupon['code'] ?? '')) ?>"></div>
             <button class="button secondary" name="apply_coupon" value="1">Apply coupon</button>
             <?php if ($coupon): ?><button class="button secondary" name="remove_coupon" value="1" formaction="<?= e(url('remove-coupon.php')) ?>">Remove</button><?php endif; ?>
         </form>
-        <div style="display:flex;justify-content:space-between;padding:8px 0"><span>Subtotal</span><span><?= money($subtotal) ?></span></div>
-        <div style="display:flex;justify-content:space-between;padding:8px 0"><span>Discount</span><span>-<?= money($discount) ?></span></div>
-        <div style="display:flex;justify-content:space-between;padding:8px 0"><span>Delivery Fee</span><span><?= money($shippingFee) ?></span></div>
+
+        <div style="display:flex; justify-content:space-between; padding:8px 0"><span>Subtotal</span><span><?= money($subtotal) ?></span></div>
+        <div style="display:flex; justify-content:space-between; padding:8px 0"><span>Discount</span><span>-<?= money($discount) ?></span></div>
+        <div style="display:flex; justify-content:space-between; padding:8px 0"><span>Delivery Fee</span><span><?= money($shippingFee) ?></span></div>
         <hr>
-        <div style="display:flex;justify-content:space-between;font-size:18px"><b>Total due</b><b><?= money(max(0, $subtotal - $discount) + $shippingFee) ?></b></div>
+        <div style="display:flex; justify-content:space-between; font-size:18px"><b>Total due</b><b><?= money(max(0, $subtotal - $discount) + $shippingFee) ?></b></div>
     </aside>
 </div>
+
 <?php require_once __DIR__ . '/app/footer.php'; ?>

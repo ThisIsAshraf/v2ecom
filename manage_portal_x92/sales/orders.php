@@ -36,13 +36,24 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     log_admin_activity('orders', 'export_csv', 'Exported orders ledger to CSV' . $filterText);
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Order Number', 'Date', 'Customer Name', 'Email', 'Phone', 'City', 'Subtotal', 'Discount', 'Shipping', 'Total', 'Status']);
+    fputcsv($out, ['Order Number', 'Date', 'Customer Name', 'Email', 'Phone', 'City', 'Subtotal', 'Discount', 'Shipping', 'Total', 'Status', 'Items']);
 
     $exportSql = "SELECT * FROM orders $whereSql ORDER BY id DESC";
     $stmt = db()->prepare($exportSql);
     $stmt->execute($params);
 
+    $itemsStmt = db()->prepare('SELECT product_name, size, quantity FROM order_items WHERE order_id = ?');
+
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        // Fetch items with size for CSV export
+        $itemsStmt->execute([$row['id']]);
+        $orderLines = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $itemSummaries = [];
+        foreach ($orderLines as $ol) {
+            $szStr = !empty($ol['size']) ? " [Size: {$ol['size']}]" : '';
+            $itemSummaries[] = "{$ol['product_name']}{$szStr} x{$ol['quantity']}";
+        }
+
         fputcsv($out, [
             $row['order_number'],
             $row['created_at'],
@@ -54,7 +65,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['discount_amount'],
             $row['shipping_amount'],
             $row['total'],
-            ucfirst($row['status'])
+            ucfirst($row['status']),
+            implode('; ', $itemSummaries)
         ]);
     }
     fclose($out);
@@ -108,7 +120,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $linesStmt->execute([$id]);
                 $orderItems = $linesStmt->fetchAll();
 
-                email_order_customer($order, $orderItems);
+                // Append size to display name for email invoices if available
+                foreach ($orderItems as &$oi) {
+                    if (!empty($oi['size']) && !str_contains($oi['product_name'], 'Size:')) {
+                        $oi['product_name'] .= ' (Size: ' . $oi['size'] . ')';
+                    }
+                }
+                unset($oi);
+
+                if (function_exists('email_order_customer')) {
+                    email_order_customer($order, $orderItems);
+                }
                 flash('success', 'Order #' . $order['order_number'] . ' confirmed and official invoice emailed to customer!');
             } else {
                 flash('success', 'Order status updated to ' . ucfirst($status) . '.');
@@ -300,11 +322,12 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Line Items Table -->
+        <!-- Line Items Table (Includes Chosen Sizes) -->
         <table class="invoice-table">
             <thead>
                 <tr>
                     <th style="text-align:left; border-top-left-radius:6px;">Item Description</th>
+                    <th style="text-align:center;">Size</th>
                     <th style="text-align:center;">SKU</th>
                     <th style="text-align:center;">Qty</th>
                     <th style="text-align:right;">Unit Price</th>
@@ -314,7 +337,18 @@ $logoUrl = site_setting('logo_url', '');
             <tbody>
                 <?php foreach ($lines as $l): ?>
                     <tr>
-                        <td style="font-weight:600; color:#222;"><?= e($l['product_name']) ?></td>
+                        <td style="font-weight:600; color:#222;">
+                            <?= e($l['product_name']) ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <?php if (!empty($l['size'])): ?>
+                                <span style="display:inline-block; background:#0f172a; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px;">
+                                    <?= e($l['size']) ?>
+                                </span>
+                            <?php else: ?>
+                                <span style="color:#aaa; font-size:12px;">—</span>
+                            <?php endif; ?>
+                        </td>
                         <td style="text-align:center; color:#777; font-size:13px;"><?= e($l['sku'] ?: '—') ?></td>
                         <td style="text-align:center; font-weight:bold;"><?= (int)$l['quantity'] ?></td>
                         <td style="text-align:right; color:#555;"><?= money($l['unit_price']) ?></td>
@@ -440,7 +474,7 @@ $logoUrl = site_setting('logo_url', '');
                 <?php endforeach; ?>
                 <?php if (!$orders): ?>
                     <tr>
-                        <td colspan="7" style="text-align:center; padding:20px;">No orders found.</td>
+                        <td colspan="7" style="text-align:center; padding:20px;" class="muted">No orders found.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

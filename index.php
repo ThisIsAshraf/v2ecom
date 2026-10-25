@@ -105,7 +105,6 @@ require_once __DIR__ . '/app/header.php';
 
 <!-- Dynamic DB-Driven Logo & Layout Customizations -->
 <style>
-    /* Dynamic DB Logo Size Controller */
     header .logo img,
     nav .brand img,
     .brand-logo img,
@@ -159,7 +158,6 @@ require_once __DIR__ . '/app/header.php';
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
     }
 
-    /* Filter & Search Toolbar Bar */
     .filter-toolbar {
         background: #ffffff;
         padding: 18px 22px;
@@ -206,7 +204,6 @@ require_once __DIR__ . '/app/header.php';
         outline: none;
     }
 
-    /* Product Grid Cards */
     .product-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -279,7 +276,7 @@ require_once __DIR__ . '/app/header.php';
 
     .product-info h3 {
         font-size: 15px;
-        margin: 0 0 10px 0;
+        margin: 0 0 6px 0;
         font-weight: 600;
         line-height: 1.35;
     }
@@ -292,6 +289,23 @@ require_once __DIR__ . '/app/header.php';
 
     .product-info h3 a:hover {
         color: var(--primary-color);
+    }
+
+    .size-tags-row {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+    }
+
+    .size-tag-badge {
+        font-size: 10px;
+        font-weight: 700;
+        color: #475569;
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        padding: 1px 5px;
+        border-radius: 3px;
     }
 
     .price-group {
@@ -335,7 +349,6 @@ require_once __DIR__ . '/app/header.php';
         background: var(--accent-hover);
     }
 
-    /* Fixed & Centered Social Feed Cards */
     .social-feed-container {
         display: flex;
         flex-wrap: wrap;
@@ -481,7 +494,6 @@ require_once __DIR__ . '/app/header.php';
 
 <!-- Search, Filter & Price Sorting Toolbar -->
 <div id="shop" class="filter-toolbar">
-    <!-- Active Category Title -->
     <div>
         <h2 style="margin:0; font-size:22px; font-weight:700;">
             <?= $cat ? 'Category: ' . e(ucfirst(str_replace('-', ' ', $cat))) : ($q ? 'Search: "' . e($q) . '"' : 'All Collection') ?>
@@ -540,6 +552,7 @@ require_once __DIR__ . '/app/header.php';
             if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']) {
                 $discountPct = round((($p['compare_price'] - $p['price']) / $p['compare_price']) * 100);
             }
+            $cardSizes = !empty($p['sizes']) ? array_filter(array_map('trim', explode(',', (string)$p['sizes']))) : [];
         ?>
             <article class="product-card">
                 <a class="product-image-wrap" href="<?= e(url('product.php?slug=' . urlencode($p['slug']))) ?>">
@@ -556,6 +569,15 @@ require_once __DIR__ . '/app/header.php';
                     <h3>
                         <a href="<?= e(url('product.php?slug=' . urlencode($p['slug']))) ?>"><?= e($p['name']) ?></a>
                     </h3>
+
+                    <!-- Available Sizes Display -->
+                    <?php if (!empty($cardSizes)): ?>
+                        <div class="size-tags-row">
+                            <?php foreach ($cardSizes as $sPill): ?>
+                                <span class="size-tag-badge"><?= e($sPill) ?></span>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
 
                     <div class="price-group">
                         <span class="price-main"><?= money($p['price']) ?></span>
