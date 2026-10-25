@@ -2,7 +2,7 @@
 admin_required();
 require_permission('products');
 
-// Standard preset sizes available for quick checkbox selection
+// Standard preset sizes available
 $availableSizePresets = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free Size'];
 
 // Download CSV Sample Import Template
@@ -24,11 +24,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
 
-    // Audit Logging: Product Export
     log_admin_activity('products', 'export_csv', 'Exported products inventory catalog to CSV');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Product ID', 'Name', 'SKU', 'Category', 'Price', 'Compare-at Price', 'Stock', 'Sizes', 'Status', 'Image URL']);
+    fputcsv($out, ['Product ID', 'Name', 'SKU', 'Category', 'Price', 'Compare-at Price', 'Total Stock', 'Sizes', 'Status', 'Image URL']);
 
     $exportQuery = 'SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.id DESC';
     $exportStmt = db()->query($exportQuery);
@@ -82,7 +81,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/catalog/products');
         }
 
-        // Standardize Header Column Map
         $headerMap = [];
         foreach ($headers as $idx => $colName) {
             $key = strtolower(trim($colName));
@@ -94,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $skipped  = 0;
 
         while (($row = fgetcsv($handle)) !== false) {
-            if (empty(array_filter($row))) continue; // Skip blank lines
+            if (empty(array_filter($row))) continue;
 
             $name     = trim((string)($row[$headerMap['name'] ?? 0] ?? ''));
             $sku      = trim((string)($row[$headerMap['sku'] ?? 1] ?? ''));
@@ -111,7 +109,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
 
-            // Category Lookup & Auto-Creation
             $catId = null;
             if ($catName !== '') {
                 $catSlug = strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', $catName), '-'));
@@ -131,7 +128,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', $name), '-'));
 
-            // Upsert Logic Match on Existing SKU
             $checkProduct = db()->prepare('SELECT id FROM products WHERE sku = ?');
             $checkProduct->execute([$sku]);
             $existingProduct = $checkProduct->fetch();
@@ -148,10 +144,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         fclose($handle);
 
-        // Audit Logging: Bulk Import Summary
         log_admin_activity('products', 'import_csv', "Bulk CSV Import: {$imported} new products inserted, {$updated} updated, {$skipped} skipped");
-
-        flash('success', "Bulk Import Complete: $imported new products inserted, $updated existing updated, $skipped skipped due to invalid data.");
+        flash('success', "Bulk Import Complete: $imported new products inserted, $updated existing updated, $skipped skipped.");
         redirect('admin/catalog/products');
     }
 
@@ -167,7 +161,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (is_file($filePath)) @unlink($filePath);
             db()->prepare('DELETE FROM product_images WHERE id=?')->execute([$imgId]);
 
-            // Audit Logging: Gallery Image Removal
             log_admin_activity('products', 'delete_gallery_image', "Deleted gallery image ID #{$imgId} from Product ID #{$prodId}");
             flash('success', 'Gallery image deleted.');
         }
@@ -182,24 +175,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sku = trim((string)($_POST['sku'] ?? ''));
         $desc = trim((string)($_POST['description'] ?? ''));
 
-        // Handle Size Selection (Preset Checkboxes + Custom Sizes)
-        $selectedSizes = [];
-        if (isset($_POST['sizes']) && is_array($_POST['sizes'])) {
-            foreach ($_POST['sizes'] as $sz) {
-                $cleanedSz = trim((string)$sz);
-                if ($cleanedSz !== '') $selectedSizes[] = $cleanedSz;
-            }
-        }
-        $customSizes = trim((string)($_POST['custom_sizes'] ?? ''));
-        if ($customSizes !== '') {
-            $extra = array_map('trim', explode(',', $customSizes));
-            foreach ($extra as $ex) {
-                if ($ex !== '' && !in_array($ex, $selectedSizes, true)) {
-                    $selectedSizes[] = $ex;
+        // Handle Size Matrix & Stock per size
+        $variantData = $_POST['variant_stock'] ?? []; // ['M' => 10, 'L' => 5, ...]
+        $enabledSizes = $_POST['enabled_sizes'] ?? []; // ['M', 'L']
+
+        $activeSizes = [];
+        $totalVariantStock = 0;
+        $variantsToSync = [];
+
+        if (is_array($enabledSizes)) {
+            foreach ($enabledSizes as $sz) {
+                $sz = trim((string)$sz);
+                if ($sz === '') continue;
+
+                $szStock = max(0, (int)($variantData[$sz] ?? 0));
+                $activeSizes[] = $sz;
+                $totalVariantStock += $szStock;
+
+                $vSku = trim((string)($_POST['variant_sku'][$sz] ?? ''));
+                if ($vSku === '') {
+                    $vSku = $sku . '-' . strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $sz));
                 }
+
+                $variantsToSync[] = [
+                    'size'  => $sz,
+                    'stock' => $szStock,
+                    'sku'   => $vSku
+                ];
             }
         }
-        $sizesString = implode(',', $selectedSizes);
+
+        $sizesString = implode(',', $activeSizes);
+
+        // Overall stock: If size variants are specified, total stock is their sum; otherwise use manual stock
+        $manualStock = max(0, (int)($_POST['stock'] ?? 0));
+        $stock = !empty($activeSizes) ? $totalVariantStock : $manualStock;
 
         $cat = (int)($_POST['category_id'] ?? 0) ?: null;
         $newCatName = trim((string)($_POST['new_category'] ?? ''));
@@ -214,17 +224,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $insCat = db()->prepare('INSERT INTO categories (name, slug) VALUES (?, ?)');
                 $insCat->execute([$newCatName, $catSlug]);
                 $cat = (int)db()->lastInsertId();
-                log_admin_activity('categories', 'create_category', "Created category '{$newCatName}' while saving product '{$name}'");
+                log_admin_activity('categories', 'create_category', "Created category '{$newCatName}'");
             }
         }
 
         $price = (float)($_POST['price'] ?? 0);
         $compare = (float)($_POST['compare_price'] ?? 0);
-        $stock = max(0, (int)($_POST['stock'] ?? 0));
         $active = isset($_POST['active']) ? 1 : 0;
         $img = trim((string)($_POST['image_url'] ?? ''));
 
-        // Upload Primary Main Cover Image
+        // Upload Cover Image
         if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] === UPLOAD_ERR_OK) {
             $tmpPath = $_FILES['image_file']['tmp_name'];
             $fileName = $_FILES['image_file']['name'];
@@ -245,26 +254,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         try {
-            $sizesLog = $sizesString !== '' ? " Sizes: [{$sizesString}]," : "";
+            $pdo = db();
+            $pdo->beginTransaction();
 
             if ($id) {
-                $s = db()->prepare('UPDATE products SET category_id=?,name=?,slug=?,sku=?,description=?,price=?,compare_price=?,image_url=?,stock=?,sizes=?,active=? WHERE id=?');
+                $s = $pdo->prepare('UPDATE products SET category_id=?,name=?,slug=?,sku=?,description=?,price=?,compare_price=?,image_url=?,stock=?,sizes=?,active=? WHERE id=?');
                 $s->execute([$cat, $name, $slug, $sku, $desc, $price, $compare ?: null, $img, $stock, $sizesString, $active, $id]);
                 $productId = $id;
 
-                // Audit Logging: Product Edit
-                log_admin_activity('products', 'update_product', "Updated product '{$name}' (ID: #{$id}, SKU: {$sku},{$sizesLog} Price: {$price}, Stock: {$stock})");
+                log_admin_activity('products', 'update_product', "Updated product '{$name}' (ID: #{$id}, Stock: {$stock}, Sizes: {$sizesString})");
             } else {
-                $s = db()->prepare('INSERT INTO products(category_id,name,slug,sku,description,price,compare_price,image_url,stock,sizes,active) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+                $s = $pdo->prepare('INSERT INTO products(category_id,name,slug,sku,description,price,compare_price,image_url,stock,sizes,active) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
                 $s->execute([$cat, $name, $slug, $sku, $desc, $price, $compare ?: null, $img, $stock, $sizesString, $active]);
-                $productId = (int)db()->lastInsertId();
+                $productId = (int)$pdo->lastInsertId();
 
-                // Audit Logging: Product Creation
-                log_admin_activity('products', 'create_product', "Created new product '{$name}' (ID: #{$productId}, SKU: {$sku},{$sizesLog} Price: {$price}, Stock: {$stock})");
+                log_admin_activity('products', 'create_product', "Created product '{$name}' (ID: #{$productId}, Stock: {$stock}, Sizes: {$sizesString})");
             }
 
-            // Upload Multiple Gallery Images
-            $uploadedGalleryCount = 0;
+            // Sync with product_variants table
+            if (!empty($variantsToSync)) {
+                // Delete variants removed by admin
+                $keepSizes = array_column($variantsToSync, 'size');
+                $inMarks = implode(',', array_fill(0, count($keepSizes), '?'));
+                $delStmt = $pdo->prepare("DELETE FROM product_variants WHERE product_id = ? AND size NOT IN ($inMarks)");
+                $delStmt->execute(array_merge([$productId], $keepSizes));
+
+                // Upsert each active variant
+                $findV = $pdo->prepare('SELECT id FROM product_variants WHERE product_id = ? AND size = ? LIMIT 1');
+                $upV   = $pdo->prepare('UPDATE product_variants SET stock = ?, sku = ? WHERE id = ?');
+                $insV  = $pdo->prepare('INSERT INTO product_variants (product_id, sku, size, stock) VALUES (?, ?, ?, ?)');
+
+                foreach ($variantsToSync as $vItem) {
+                    $findV->execute([$productId, $vItem['size']]);
+                    $existingVariantId = $findV->fetchColumn();
+
+                    if ($existingVariantId) {
+                        $upV->execute([$vItem['stock'], $vItem['sku'], $existingVariantId]);
+                    } else {
+                        $insV->execute([$productId, $vItem['sku'], $vItem['size'], $vItem['stock']]);
+                    }
+                }
+            } else {
+                // If no sizes checked, clear out any old variants for this product
+                $pdo->prepare('DELETE FROM product_variants WHERE product_id = ?')->execute([$productId]);
+            }
+
+            // Upload Gallery Images
             if (!empty($_FILES['gallery_files']['name'][0])) {
                 $uploadDir = dirname(__DIR__, 2) . '/uploads/';
                 if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
@@ -276,23 +311,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)) {
                             $gName = 'gal_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
                             if (move_uploaded_file($tmp, $uploadDir . $gName)) {
-                                db()->prepare('INSERT INTO product_images (product_id, image_url) VALUES (?, ?)')
+                                $pdo->prepare('INSERT INTO product_images (product_id, image_url) VALUES (?, ?)')
                                     ->execute([$productId, 'uploads/' . $gName]);
-                                $uploadedGalleryCount++;
                             }
                         }
                     }
                 }
             }
 
-            if ($uploadedGalleryCount > 0) {
-                log_admin_activity('products', 'upload_gallery', "Uploaded {$uploadedGalleryCount} gallery images to product ID #{$productId} ('{$name}')");
-            }
-
-            flash('success', 'Product saved.');
+            $pdo->commit();
+            flash('success', 'Product and size inventory saved successfully.');
         } catch (Throwable $e) {
+            if (db()->inTransaction()) db()->rollBack();
             error_log($e->getMessage());
-            flash('error', 'Could not save product.');
+            flash('error', 'Could not save product: ' . $e->getMessage());
         }
         redirect('admin/catalog/products');
     }
@@ -307,7 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($prod) {
             $newStatus = empty($prod['active']) ? 'Active (Visible)' : 'Hidden';
-            log_admin_activity('products', 'toggle_visibility', "Toggled visibility for '{$prod['name']}' (ID #{$id}) to {$newStatus}");
+            log_admin_activity('products', 'toggle_visibility', "Toggled visibility for '{$prod['name']}' to {$newStatus}");
         }
 
         flash('success', 'Product visibility updated.');
@@ -317,19 +349,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $edit = null;
 $galleryImages = [];
-$currentProductSizes = [];
+$currentVariants = []; // Map size => ['stock' => int, 'sku' => string]
 
 if (isset($_GET['edit'])) {
     $s = db()->prepare('SELECT * FROM products WHERE id=?');
     $s->execute([(int)$_GET['edit']]);
     $edit = $s->fetch();
     if ($edit) {
-        if (!empty($edit['sizes'])) {
-            $currentProductSizes = array_filter(array_map('trim', explode(',', (string)$edit['sizes'])));
-        }
         $gs = db()->prepare('SELECT * FROM product_images WHERE product_id=? ORDER BY id ASC');
         $gs->execute([$edit['id']]);
         $galleryImages = $gs->fetchAll();
+
+        // Fetch variants for this product
+        $vStmt = db()->prepare('SELECT * FROM product_variants WHERE product_id=? ORDER BY id ASC');
+        $vStmt->execute([$edit['id']]);
+        $rows = $vStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $r) {
+            if (!empty($r['size'])) {
+                $currentVariants[$r['size']] = [
+                    'stock' => (int)$r['stock'],
+                    'sku'   => $r['sku']
+                ];
+            }
+        }
     }
 }
 
@@ -399,7 +441,7 @@ admin_header('Products & inventory'); ?>
         <div class="form-grid">
             <div class="field"><label>Product name *</label><input name="name" required value="<?= e($edit['name'] ?? '') ?>"></div>
             <div class="field"><label>Slug (URL)</label><input name="slug" value="<?= e($edit['slug'] ?? '') ?>" placeholder="auto-generated if blank"></div>
-            <div class="field"><label>SKU *</label><input name="sku" required value="<?= e($edit['sku'] ?? '') ?>"></div>
+            <div class="field"><label>Base SKU *</label><input name="sku" id="base_sku_input" required value="<?= e($edit['sku'] ?? '') ?>"></div>
             <div class="field">
                 <label>Category</label>
                 <select name="category_id">
@@ -412,33 +454,68 @@ admin_header('Products & inventory'); ?>
             <div class="field"><label>Or Create Category</label><input name="new_category" placeholder="New category name"></div>
             <div class="field"><label>Price *</label><input type="number" min="0" step="0.01" name="price" required value="<?= e((string)($edit['price'] ?? '')) ?>"></div>
             <div class="field"><label>Compare-at price</label><input type="number" min="0" step="0.01" name="compare_price" value="<?= e((string)($edit['compare_price'] ?? '')) ?>"></div>
-            <div class="field"><label>Stock quantity</label><input type="number" min="0" name="stock" value="<?= e((string)($edit['stock'] ?? 0)) ?>"></div>
+
+            <div class="field">
+                <label>Standard / Fallback Stock</label>
+                <input type="number" min="0" name="stock" id="main_stock_input" value="<?= e((string)($edit['stock'] ?? 0)) ?>">
+                <small class="muted" style="display:block; margin-top:3px;">Note: If size variants below are enabled, this total will be calculated automatically from the variant quantities.</small>
+            </div>
+
             <div class="field"><label>Main Cover Image</label><input type="file" name="image_file" accept="image/*"></div>
             <div class="field"><label>Or Cover Image URL</label><input type="text" name="image_url" value="<?= e($edit['image_url'] ?? '') ?>"></div>
         </div>
 
-        <!-- Available Sizes Section -->
-        <div class="field" style="margin-top: 18px; padding: 16px; background: #fafafa; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <label style="font-weight: 600; display: block; margin-bottom: 6px;">Available Sizes</label>
-            <p class="muted small" style="margin-top: 0; margin-bottom: 12px;">Check all sizes in stock for this product. Leave unchecked if sizes do not apply.</p>
-
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                <?php foreach ($availableSizePresets as $sz): ?>
-                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; background: #fff; border: 1px solid #cbd5e1; padding: 6px 14px; border-radius: 6px; user-select: none;">
-                        <input type="checkbox" name="sizes[]" value="<?= e($sz) ?>" <?= in_array($sz, $currentProductSizes, true) ? 'checked' : '' ?> style="width: 16px; height: 16px; margin: 0;">
-                        <span style="font-size: 13px; font-weight: 600; color: #1e293b;"><?= e($sz) ?></span>
-                    </label>
-                <?php endforeach; ?>
+        <!-- SIZES & INDIVIDUAL STOCK MATRIX -->
+        <div class="field" style="margin-top: 22px; padding: 20px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h3 style="margin:0; font-size:16px; color:#0f172a;">📏 Size Variants & Stock Quantities</h3>
+                    <p class="muted small" style="margin:2px 0 0 0;">Check each available size and enter its individual stock count.</p>
+                </div>
             </div>
 
-            <?php
-            // Identify custom sizes not in standard presets
-            $customSizesList = array_diff($currentProductSizes, $availableSizePresets);
-            $customSizesVal = implode(', ', $customSizesList);
-            ?>
-            <div style="margin-top: 12px;">
-                <label style="font-size: 12px; font-weight: 500; color: #475569; display: block; margin-bottom: 4px;">Other / Custom Sizes (comma-separated, e.g. <code>32, 34, 36</code> or <code>One Size</code>):</label>
-                <input type="text" name="custom_sizes" value="<?= e($customSizesVal) ?>" placeholder="e.g. 30, 32, 34, 36" style="max-width: 380px; font-size: 13px;">
+            <div class="table-wrap" style="background:#fff; border-radius:6px; border:1px solid #e2e8f0;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;" id="sizeVariantsTable">
+                    <thead>
+                        <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1; text-align:left;">
+                            <th style="padding:10px 14px; width:70px;">Enable</th>
+                            <th style="padding:10px 14px; width:120px;">Size</th>
+                            <th style="padding:10px 14px; width:160px;">Stock in Hand</th>
+                            <th style="padding:10px 14px;">Variant SKU (Optional)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        // Merge standard presets with existing custom sizes from DB
+                        $allKnownSizes = array_unique(array_merge($availableSizePresets, array_keys($currentVariants)));
+                        foreach ($allKnownSizes as $sz):
+                            $isChecked = isset($currentVariants[$sz]);
+                            $vStock = $isChecked ? $currentVariants[$sz]['stock'] : 0;
+                            $vSku   = $isChecked ? $currentVariants[$sz]['sku'] : '';
+                        ?>
+                            <tr style="border-bottom:1px solid #f1f5f9;">
+                                <td style="padding:10px 14px; text-align:center;">
+                                    <input type="checkbox" name="enabled_sizes[]" value="<?= e($sz) ?>" <?= $isChecked ? 'checked' : '' ?> onchange="toggleSizeRow(this)" style="width:17px; height:17px; cursor:pointer;">
+                                </td>
+                                <td style="padding:10px 14px; font-weight:700; color:#1e293b;">
+                                    <?= e($sz) ?>
+                                </td>
+                                <td style="padding:10px 14px;">
+                                    <input type="number" min="0" name="variant_stock[<?= e($sz) ?>]" value="<?= $vStock ?>" class="variant-stock-input" <?= !$isChecked ? 'disabled' : '' ?> style="width:100px; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" placeholder="0">
+                                </td>
+                                <td style="padding:10px 14px;">
+                                    <input type="text" name="variant_sku[<?= e($sz) ?>]" value="<?= e($vSku) ?>" class="variant-sku-input" <?= !$isChecked ? 'disabled' : '' ?> style="max-width:240px; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" placeholder="<?= e($edit['sku'] ?? 'SKU') ?>-<?= e($sz) ?>">
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Custom Size Addition Input -->
+            <div style="margin-top: 14px; display:flex; gap:10px; align-items:center;">
+                <input type="text" id="newCustomSizeInput" placeholder="Add custom size (e.g. 32, 34, 40)" style="max-width:260px; padding:7px 10px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px;">
+                <button type="button" class="button secondary" onclick="addNewSizeRow()" style="padding:7px 14px; font-size:13px;">+ Add Size</button>
             </div>
         </div>
 
@@ -498,9 +575,9 @@ admin_header('Products & inventory'); ?>
                     <th>Image</th>
                     <th>Product / SKU</th>
                     <th>Category</th>
-                    <th>Sizes</th>
+                    <th>Sizes & Stock</th>
                     <th>Price</th>
-                    <th>Stock</th>
+                    <th>Total Stock</th>
                     <th>State</th>
                     <th>Action</th>
                 </tr>
@@ -523,7 +600,22 @@ admin_header('Products & inventory'); ?>
                             <td><b><?= e($p['name']) ?></b><br><span class="muted small"><?= e($p['sku']) ?></span></td>
                             <td><?= e($p['category_name'] ?? '—') ?></td>
                             <td>
-                                <?php if (!empty($p['sizes'])): ?>
+                                <?php
+                                $pvList = db()->prepare('SELECT size, stock FROM product_variants WHERE product_id = ? ORDER BY id ASC');
+                                $pvList->execute([$p['id']]);
+                                $varRows = $pvList->fetchAll(PDO::FETCH_ASSOC);
+
+                                if (!empty($varRows)): ?>
+                                    <div style="display:flex; gap:4px; flex-wrap:wrap; max-width:240px;">
+                                        <?php foreach ($varRows as $vr):
+                                            $badgeColor = ((int)$vr['stock'] <= 0) ? '#fee2e2; color:#b91c1c;' : '#e2e8f0; color:#1e293b;';
+                                        ?>
+                                            <span style="display:inline-block; background:<?= $badgeColor ?>; font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; margin:1px;">
+                                                <?= e($vr['size']) ?>: <?= (int)$vr['stock'] ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php elseif (!empty($p['sizes'])): ?>
                                     <?php
                                     $szArr = array_filter(array_map('trim', explode(',', (string)$p['sizes'])));
                                     foreach ($szArr as $itemSz): ?>
@@ -563,5 +655,53 @@ admin_header('Products & inventory'); ?>
         </div>
     <?php endif; ?>
 </div>
+
+<script>
+    function toggleSizeRow(checkboxEl) {
+        const row = checkboxEl.closest('tr');
+        const inputs = row.querySelectorAll('.variant-stock-input, .variant-sku-input');
+        inputs.forEach(input => {
+            input.disabled = !checkboxEl.checked;
+            if (checkboxEl.checked && input.classList.contains('variant-stock-input') && !input.value) {
+                input.value = '10'; // default starting stock suggestion
+            }
+        });
+    }
+
+    function addNewSizeRow() {
+        const customInput = document.getElementById('newCustomSizeInput');
+        const sizeName = customInput.value.trim().toUpperCase();
+        if (!sizeName) return;
+
+        // Check if size already exists in the table
+        const existing = Array.from(document.querySelectorAll('#sizeVariantsTable tbody tr td:nth-child(2)'))
+            .some(td => td.textContent.trim().toUpperCase() === sizeName);
+        if (existing) {
+            alert('Size ' + sizeName + ' is already listed in the matrix.');
+            return;
+        }
+
+        const baseSku = (document.getElementById('base_sku_input').value || 'SKU').trim();
+        const tbody = document.querySelector('#sizeVariantsTable tbody');
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #f1f5f9';
+        tr.innerHTML = `
+            <td style="padding:10px 14px; text-align:center;">
+                <input type="checkbox" name="enabled_sizes[]" value="${sizeName}" checked onchange="toggleSizeRow(this)" style="width:17px; height:17px; cursor:pointer;">
+            </td>
+            <td style="padding:10px 14px; font-weight:700; color:#1e293b;">
+                ${sizeName}
+            </td>
+            <td style="padding:10px 14px;">
+                <input type="number" min="0" name="variant_stock[${sizeName}]" value="10" class="variant-stock-input" style="width:100px; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" placeholder="0">
+            </td>
+            <td style="padding:10px 14px;">
+                <input type="text" name="variant_sku[${sizeName}]" value="${baseSku}-${sizeName}" class="variant-sku-input" style="max-width:240px; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;">
+            </td>
+        `;
+        tbody.appendChild(tr);
+        customInput.value = '';
+    }
+</script>
 
 <?php admin_footer(); ?>
