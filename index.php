@@ -83,6 +83,10 @@ $b3Sub   = site_setting('trust_badge_3_sub', 'Crafted for long-lasting comfort')
 $b4Title = site_setting('trust_badge_4_title', 'Hassle-Free Exchange');
 $b4Sub   = site_setting('trust_badge_4_sub', 'Easy returns & order support');
 
+// Dynamic DB Logo Size Setting
+$dbLogoHeight = (int)site_setting('logo_height', '58');
+if ($dbLogoHeight <= 0) $dbLogoHeight = 58;
+
 // Dynamic SEO Variables
 $pageTitle       = site_setting('seo_meta_title', 'Shop Modern Clothing & Wardrobe Essentials | DiverseBD');
 $metaDescription = site_setting('seo_meta_description', 'Discover modern clothing, premium wardrobe staples, and new season drops with nationwide Cash on Delivery in Bangladesh.');
@@ -99,8 +103,22 @@ if ($cat) {
 require_once __DIR__ . '/app/header.php';
 ?>
 
-<!-- Redesigned Storefront Styles -->
+<!-- Dynamic DB-Driven Logo & Layout Customizations -->
 <style>
+    /* Dynamic DB Logo Size Controller */
+    header .logo img,
+    nav .brand img,
+    .brand-logo img,
+    .site-logo,
+    header img[alt*="logo" i],
+    header img[src*="logo" i] {
+        height: <?= $dbLogoHeight ?>px !important;
+        max-height: <?= $dbLogoHeight ?>px !important;
+        width: auto !important;
+        object-fit: contain !important;
+        display: block !important;
+    }
+
     :root {
         --primary-color: #25483d;
         --accent-hover: #1b352c;
@@ -577,7 +595,7 @@ require_once __DIR__ . '/app/header.php';
                     <div class="social-feed-overlay">
                         <span class="social-badge"><?= e($sf['platform']) ?></span>
                         <?php if (!empty($sf['title'])): ?>
-                            <span style="font-size: 13px; font-weight: 600; line-height: 1.3; text-shadow: 0 1px 3px rgba(0,0,0,0.8);"><?= e($sf['title']) ?> ↗</span>
+                            <span style="font-size: 13px; font-weight: 600; line-height: 1.3; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);"><?= e($sf['title']) ?> ↗</span>
                         <?php endif; ?>
                     </div>
                 </a>

@@ -37,6 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $adminEmail = trim((string)($_POST['admin_notification_email'] ?? ''));
         $currency = trim((string)($_POST['currency_symbol'] ?? '৳'));
 
+        // Logo Display Size Controller (DB Stored)
+        $logoHeight = max(30, min(180, (int)($_POST['logo_height'] ?? 58)));
+
         // SEO Settings
         $seoTitle = trim((string)($_POST['seo_meta_title'] ?? ''));
         $seoDesc  = trim((string)($_POST['seo_meta_description'] ?? ''));
@@ -59,14 +62,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $invoiceSubj   = trim((string)($_POST['email_invoice_subject'] ?? 'Official Tax Invoice - Order #{order_number}'));
         $invoiceNote   = trim((string)($_POST['invoice_footer_note'] ?? 'Thank you for shopping with us!'));
 
-        // Store Guarantee / Trust Badges Customization
+        // Store Guarantee / Trust Badges Customization (All 4 badges with icons)
         $trustKeys = [
+            'trust_badge_1_icon',
             'trust_badge_1_title',
             'trust_badge_1_sub',
+            'trust_badge_2_icon',
             'trust_badge_2_title',
             'trust_badge_2_sub',
+            'trust_badge_3_icon',
             'trust_badge_3_title',
             'trust_badge_3_sub',
+            'trust_badge_4_icon',
             'trust_badge_4_title',
             'trust_badge_4_sub'
         ];
@@ -81,11 +88,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/system/settings');
         }
 
-        // Save Branding 
+        // Save Branding & Logo Height
         site_setting_save('site_name', $name);
         site_setting_save('announcement', $announcement);
         site_setting_save('admin_notification_email', $adminEmail);
         site_setting_save('currency_symbol', $currency);
+        site_setting_save('logo_height', (string)$logoHeight);
 
         // Save SEO Settings
         site_setting_save('seo_meta_title', $seoTitle);
@@ -135,13 +143,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        flash('success', 'Store configuration, SEO meta tags, mail credentials, and template settings updated.');
+        flash('success', 'Store configuration, guarantees, and branding settings updated.');
         redirect('admin/system/settings');
     }
 }
 
 admin_header($title);
 $currentLogo = site_setting('logo_url', '');
+$logoHeight  = (int)site_setting('logo_height', '58');
+if ($logoHeight <= 0) $logoHeight = 58;
+
 $adminEmail  = site_setting('admin_notification_email', envv('ADMIN_NOTIFICATION_EMAIL', ''));
 $currency    = site_setting('currency_symbol', envv('CURRENCY', '৳'));
 
@@ -168,7 +179,7 @@ $invoiceSubj   = site_setting('email_invoice_subject', 'Official Tax Invoice - O
 $invoiceNote   = site_setting('invoice_footer_note', 'Thank you for shopping with us!');
 ?>
 
-<div class="panel" style="max-width:800px; margin-bottom:25px;">
+<div class="panel" style="max-width:850px; margin-bottom:25px;">
     <h2>Store Branding & Identity</h2>
     <form method="post" enctype="multipart/form-data">
         <?= csrf_field() ?>
@@ -196,13 +207,106 @@ $invoiceNote   = site_setting('invoice_footer_note', 'Thank you for shopping wit
             <input name="announcement" value="<?= e(site_setting('announcement', '')) ?>">
         </div>
 
-        <div class="field">
-            <label>Store Logo</label>
-            <input name="logo" type="file" accept="image/*">
-            <?php if ($currentLogo !== ''): ?>
-                <img src="<?= e(url($currentLogo)) ?>" style="max-height: 40px; display: block; margin: 8px 0;">
-                <label><input type="checkbox" name="remove_logo" value="1" style="width:auto"> Remove logo</label>
-            <?php endif; ?>
+        <!-- Store Logo & Dynamic Size Control -->
+        <div class="form-grid" style="align-items:flex-start;">
+            <div class="field">
+                <label>Store Logo File</label>
+                <input name="logo" type="file" accept="image/*">
+                <?php if ($currentLogo !== ''): ?>
+                    <div style="margin-top:10px; padding:10px; background:#fafafa; border:1px solid #eee; border-radius:6px; display:inline-block;">
+                        <span class="small muted" style="display:block; margin-bottom:4px;">Current Preview:</span>
+                        <img src="<?= e(url($currentLogo)) ?>" style="height: <?= (int)$logoHeight ?>px; max-height:120px; width:auto; display:block; object-fit:contain;">
+                    </div>
+                    <label style="margin-top:8px; display:block;"><input type="checkbox" name="remove_logo" value="1" style="width:auto"> Remove logo</label>
+                <?php endif; ?>
+            </div>
+            <div class="field">
+                <label>Logo Display Height (px)</label>
+                <input type="number" name="logo_height" min="30" max="180" step="2" value="<?= (int)$logoHeight ?>" placeholder="e.g. 60">
+                <p class="small muted">Adjusts how tall your logo renders on storefront bars (recommended: 50px - 75px).</p>
+            </div>
+        </div>
+
+        <hr style="margin:25px 0; border:0; border-top:1px solid var(--line,#eee);">
+
+        <!-- Store Guarantees / Badges (Full 4 Badges with Icons, Titles & Subtitles) -->
+        <h2>Homepage Store Guarantees / Badges</h2>
+        <p class="muted small" style="margin-top:-5px; margin-bottom:20px;">Manage the icons, titles, and descriptions of all 4 trust badges displayed on your homepage.</p>
+
+        <!-- Badge 1 -->
+        <div style="background:#fafafa; border:1px solid #eee; padding:15px; border-radius:8px; margin-bottom:15px;">
+            <strong style="color:var(--primary-color, #2c3e50); display:block; margin-bottom:10px;">Badge 1</strong>
+            <div style="display:grid; grid-template-columns: 80px 1fr 2fr; gap:12px;">
+                <div class="field" style="margin:0;">
+                    <label>Icon</label>
+                    <input name="trust_badge_1_icon" value="<?= e(site_setting('trust_badge_1_icon', '🚀')) ?>" style="text-align:center; font-size:18px;">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Title</label>
+                    <input name="trust_badge_1_title" value="<?= e(site_setting('trust_badge_1_title', 'Nationwide Shipping')) ?>">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Subtitle / Description</label>
+                    <input name="trust_badge_1_sub" value="<?= e(site_setting('trust_badge_1_sub', 'Fast delivery across Bangladesh')) ?>">
+                </div>
+            </div>
+        </div>
+
+        <!-- Badge 2 -->
+        <div style="background:#fafafa; border:1px solid #eee; padding:15px; border-radius:8px; margin-bottom:15px;">
+            <strong style="color:var(--primary-color, #2c3e50); display:block; margin-bottom:10px;">Badge 2</strong>
+            <div style="display:grid; grid-template-columns: 80px 1fr 2fr; gap:12px;">
+                <div class="field" style="margin:0;">
+                    <label>Icon</label>
+                    <input name="trust_badge_2_icon" value="<?= e(site_setting('trust_badge_2_icon', '💵')) ?>" style="text-align:center; font-size:18px;">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Title</label>
+                    <input name="trust_badge_2_title" value="<?= e(site_setting('trust_badge_2_title', 'Cash on Delivery')) ?>">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Subtitle / Description</label>
+                    <input name="trust_badge_2_sub" value="<?= e(site_setting('trust_badge_2_sub', 'Pay safely at your doorstep')) ?>">
+                </div>
+            </div>
+        </div>
+
+        <!-- Badge 3 -->
+        <div style="background:#fafafa; border:1px solid #eee; padding:15px; border-radius:8px; margin-bottom:15px;">
+            <strong style="color:var(--primary-color, #2c3e50); display:block; margin-bottom:10px;">Badge 3</strong>
+            <div style="display:grid; grid-template-columns: 80px 1fr 2fr; gap:12px;">
+                <div class="field" style="margin:0;">
+                    <label>Icon</label>
+                    <input name="trust_badge_3_icon" value="<?= e(site_setting('trust_badge_3_icon', '✨')) ?>" style="text-align:center; font-size:18px;">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Title</label>
+                    <input name="trust_badge_3_title" value="<?= e(site_setting('trust_badge_3_title', 'Premium Fabric')) ?>">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Subtitle / Description</label>
+                    <input name="trust_badge_3_sub" value="<?= e(site_setting('trust_badge_3_sub', 'Crafted for long-lasting comfort')) ?>">
+                </div>
+            </div>
+        </div>
+
+        <!-- Badge 4 -->
+        <div style="background:#fafafa; border:1px solid #eee; padding:15px; border-radius:8px; margin-bottom:15px;">
+            <strong style="color:var(--primary-color, #2c3e50); display:block; margin-bottom:10px;">Badge 4</strong>
+            <div style="display:grid; grid-template-columns: 80px 1fr 2fr; gap:12px;">
+                <div class="field" style="margin:0;">
+                    <label>Icon</label>
+                    <input name="trust_badge_4_icon" value="<?= e(site_setting('trust_badge_4_icon', '🔄')) ?>" style="text-align:center; font-size:18px;">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Title</label>
+                    <input name="trust_badge_4_title" value="<?= e(site_setting('trust_badge_4_title', 'Hassle-Free Exchange')) ?>">
+                </div>
+                <div class="field" style="margin:0;">
+                    <label>Subtitle / Description</label>
+                    <input name="trust_badge_4_sub" value="<?= e(site_setting('trust_badge_4_sub', 'Easy returns & order support')) ?>">
+                </div>
+            </div>
         </div>
 
         <hr style="margin:25px 0; border:0; border-top:1px solid var(--line,#eee);">
@@ -298,34 +402,12 @@ $invoiceNote   = site_setting('invoice_footer_note', 'Thank you for shopping wit
             </div>
         </div>
 
-        <hr style="margin:25px 0; border:0; border-top:1px solid var(--line,#eee);">
-
-        <h2>Homepage Store Guarantees / Badges</h2>
-        <div class="form-grid">
-            <div class="field">
-                <label>Badge 1 Title</label>
-                <input name="trust_badge_1_title" value="<?= e(site_setting('trust_badge_1_title', 'Nationwide Shipping')) ?>">
-            </div>
-            <div class="field">
-                <label>Badge 1 Subtitle</label>
-                <input name="trust_badge_1_sub" value="<?= e(site_setting('trust_badge_1_sub', 'Fast delivery across Bangladesh')) ?>">
-            </div>
-            <div class="field">
-                <label>Badge 2 Title</label>
-                <input name="trust_badge_2_title" value="<?= e(site_setting('trust_badge_2_title', 'Cash on Delivery')) ?>">
-            </div>
-            <div class="field">
-                <label>Badge 2 Subtitle</label>
-                <input name="trust_badge_2_sub" value="<?= e(site_setting('trust_badge_2_sub', 'Pay safely at your doorstep')) ?>">
-            </div>
-        </div>
-
         <button type="submit" style="margin-top:20px;">Save All Settings</button>
     </form>
 </div>
 
 <!-- Send Test Email Panel -->
-<div class="panel" style="max-width:800px;">
+<div class="panel" style="max-width:850px;">
     <h2>Test Mail Configuration</h2>
     <form method="post" class="inline-form" style="display:flex; gap:10px;">
         <?= csrf_field() ?>
