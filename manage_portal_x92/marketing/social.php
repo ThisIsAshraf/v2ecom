@@ -15,6 +15,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $active = isset($_POST['active']) ? 1 : 0;
         $img = trim((string)($_POST['image_url'] ?? ''));
 
+        $imageUploaded = false;
+
         // Handle Image Upload
         if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] === UPLOAD_ERR_OK) {
             $tmpPath = $_FILES['image_file']['tmp_name'];
@@ -26,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newFileName = 'social_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
                 if (move_uploaded_file($tmpPath, $uploadDir . $newFileName)) {
                     $img = 'uploads/' . $newFileName;
+                    $imageUploaded = true;
                 }
             }
         }
@@ -35,12 +38,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/marketing/social');
         }
 
+        $statusLabel = $active ? 'Visible' : 'Hidden';
+        $uploadNote = $imageUploaded ? ' (New image uploaded)' : '';
+        $cardLabel = $title !== '' ? "'{$title}'" : 'Untitled card';
+
         if ($id) {
             $s = db()->prepare('UPDATE social_links SET platform=?, title=?, post_url=?, image_url=?, sort_order=?, active=? WHERE id=?');
             $s->execute([$platform, $title, $postUrl, $img, $sortOrder, $active, $id]);
+
+            // Audit Logging: Social Card Updated
+            log_admin_activity(
+                'social',
+                'update_social_card',
+                "Updated {$platform} card ID #{$id} ({$cardLabel}): Status: {$statusLabel}, Order: {$sortOrder}, URL: '{$postUrl}'{$uploadNote}"
+            );
         } else {
             $s = db()->prepare('INSERT INTO social_links (platform, title, post_url, image_url, sort_order, active) VALUES (?,?,?,?,?,?)');
             $s->execute([$platform, $title, $postUrl, $img, $sortOrder, $active]);
+            $newId = (int)db()->lastInsertId();
+
+            // Audit Logging: Social Card Created
+            log_admin_activity(
+                'social',
+                'create_social_card',
+                "Created new {$platform} card ID #{$newId} ({$cardLabel}): Status: {$statusLabel}, Order: {$sortOrder}, URL: '{$postUrl}'{$uploadNote}"
+            );
         }
         flash('success', 'Social post saved.');
         redirect('admin/marketing/social');
@@ -48,15 +70,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
-        db()->prepare('UPDATE social_links SET active=1-active WHERE id=?')->execute([$id]);
-        flash('success', 'Post status updated.');
+        $chk = db()->prepare('SELECT platform, title, active FROM social_links WHERE id=?');
+        $chk->execute([$id]);
+        $sp = $chk->fetch();
+
+        if ($sp) {
+            db()->prepare('UPDATE social_links SET active=1-active WHERE id=?')->execute([$id]);
+            $newState = empty($sp['active']) ? 'Active (Visible on storefront)' : 'Hidden';
+            $cardLabel = !empty($sp['title']) ? "'{$sp['title']}'" : 'Untitled card';
+
+            // Audit Logging: Social Card Visibility Toggle
+            log_admin_activity(
+                'social',
+                'toggle_social_visibility',
+                "Toggled {$sp['platform']} card ID #{$id} ({$cardLabel}) status to {$newState}"
+            );
+
+            flash('success', 'Post status updated.');
+        }
         redirect('admin/marketing/social');
     }
 
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
-        db()->prepare('DELETE FROM social_links WHERE id=?')->execute([$id]);
-        flash('success', 'Social post deleted.');
+        $chk = db()->prepare('SELECT platform, title, image_url FROM social_links WHERE id=?');
+        $chk->execute([$id]);
+        $sp = $chk->fetch();
+
+        if ($sp) {
+            // Delete associated upload if stored locally
+            if (!empty($sp['image_url']) && str_starts_with($sp['image_url'], 'uploads/')) {
+                $filePath = dirname(__DIR__, 2) . '/' . $sp['image_url'];
+                if (is_file($filePath)) @unlink($filePath);
+            }
+
+            db()->prepare('DELETE FROM social_links WHERE id=?')->execute([$id]);
+
+            // Audit Logging: Social Card Deleted
+            $cardLabel = !empty($sp['title']) ? "'{$sp['title']}'" : 'Untitled card';
+            log_admin_activity(
+                'social',
+                'delete_social_card',
+                "Deleted {$sp['platform']} feed card ID #{$id} ({$cardLabel})"
+            );
+
+            flash('success', 'Social post deleted.');
+        }
         redirect('admin/marketing/social');
     }
 }

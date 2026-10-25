@@ -49,10 +49,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Build clean .env file content
         $lines = ["# Generated via Admin Panel on " . date('Y-m-d H:i:s')];
         foreach ($envVars as $k => $v) {
-            if (str_contains($v, ' ')) {
-                $v = '"' . $v . '"';
+            $writeVal = $v;
+            if (str_contains($writeVal, ' ')) {
+                $writeVal = '"' . $writeVal . '"';
             }
-            $lines[] = "{$k}={$v}";
+            $lines[] = "{$k}={$writeVal}";
 
             // Sync values with site_settings table
             site_setting_save(strtolower($k), $v);
@@ -66,8 +67,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (file_put_contents($envPath, $newEnvContent) !== false) {
+            // Audit Logging: Environment Variables Saved
+            $modifiedKeys = array_keys($envVars);
+            $totalCount = count($modifiedKeys);
+            $sampleKeys = implode(', ', array_slice($modifiedKeys, 0, 6));
+            if ($totalCount > 6) $sampleKeys .= ', ...';
+
+            log_admin_activity(
+                'env',
+                'save_env',
+                "Updated {$totalCount} variables in root .env file and synced with site_settings ({$sampleKeys})"
+            );
+
             flash('success', '.env variables updated and synced with database successfully!');
         } else {
+            // Audit Logging: File Write Failure
+            log_admin_activity(
+                'env',
+                'save_env_failed',
+                'Failed to write updated configuration to root .env file due to server permissions'
+            );
+
             flash('error', 'Failed to save .env file. Check server write permissions.');
         }
 
@@ -77,6 +97,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'restore_backup') {
         if (is_file($backupPath)) {
             copy($backupPath, $envPath);
+
+            // Audit Logging: .ENV Backup Restored
+            log_admin_activity(
+                'env',
+                'restore_backup',
+                'Restored root .env configuration from previous backup snapshot (.env.backup)'
+            );
+
             flash('success', '.env restored from previous backup.');
         } else {
             flash('error', 'No backup file found.');

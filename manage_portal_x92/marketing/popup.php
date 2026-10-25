@@ -18,6 +18,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pBtnUrl   = trim(base64_decode((string)($_POST['popup_button_url_b64'] ?? '')));
     $b64Image  = (string)($_POST['popup_image_file_b64'] ?? '');
 
+    $imageUploaded = false;
+
     // Handle File Upload Sent via Client-Side Base64
     if (!empty($b64Image) && str_contains($b64Image, ';base64,')) {
         [$typeData, $encodedData] = explode(';base64,', $b64Image);
@@ -39,6 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (file_put_contents($targetFilePath, $binaryData) !== false) {
             $pImgUrl = 'uploads/' . $newFileName;
+            $imageUploaded = true;
         }
     }
 
@@ -55,6 +58,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($settingsMap as $key => $val) {
         $stmt->execute([$key, $val]);
     }
+
+    // Audit Logging: Promotional Pop-up Modal Update
+    $statusText = ($enabled === '1') ? 'Enabled' : 'Disabled';
+    $imgText = $imageUploaded ? ' (New image uploaded)' : '';
+    log_admin_activity(
+        'settings',
+        'update_popup_banner',
+        "Updated promotional pop-up modal: State: {$statusText}, Title: '{$pTitle}', Button: '{$pBtnText}' -> '{$pBtnUrl}'{$imgText}"
+    );
 
     flash('success', 'Pop-up settings updated successfully!');
     redirect('admin/marketing/popup');

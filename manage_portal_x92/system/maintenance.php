@@ -8,13 +8,28 @@ $title = 'Maintenance Mode Control';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 
-    $mode    = isset($_POST['maintenance_mode']) ? '1' : '0';
-    $mTitle  = trim((string)($_POST['maintenance_title'] ?? ''));
-    $mMsg    = trim((string)($_POST['maintenance_message'] ?? ''));
+    $mode   = isset($_POST['maintenance_mode']) ? '1' : '0';
+    $mTitle = trim((string)($_POST['maintenance_title'] ?? ''));
+    $mMsg   = trim((string)($_POST['maintenance_message'] ?? ''));
+
+    // Check prior maintenance mode state for accurate audit logging
+    $oldMode = site_setting('maintenance_mode', '0');
 
     site_setting_save('maintenance_mode', $mode);
     site_setting_save('maintenance_title', $mTitle);
     site_setting_save('maintenance_message', $mMsg);
+
+    // Audit Logging: Maintenance Mode State Change & Content Update
+    $statusText = ($mode === '1') ? 'ENABLED (Storefront Closed)' : 'DISABLED (Storefront Live)';
+    $transition = ($oldMode !== $mode)
+        ? "State changed from " . ($oldMode === '1' ? 'ENABLED' : 'DISABLED') . " to {$statusText}"
+        : "Settings updated (State: {$statusText})";
+
+    log_admin_activity(
+        'settings',
+        'update_maintenance_mode',
+        "{$transition}. Headline: '{$mTitle}', Notice: '{$mMsg}'"
+    );
 
     flash('success', 'Maintenance mode settings updated successfully.');
     redirect('admin/system/maintenance');

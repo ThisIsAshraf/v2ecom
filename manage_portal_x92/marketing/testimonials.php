@@ -22,9 +22,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id) {
             $s = db()->prepare('UPDATE testimonials SET customer_name=?, review_text=?, rating=?, sort_order=?, active=? WHERE id=?');
             $s->execute([$name, $review, $rating, $sortOrder, $active, $id]);
+
+            // Audit Logging: Testimonial Updated
+            $statusLabel = $active ? 'Visible' : 'Hidden';
+            log_admin_activity(
+                'reviews',
+                'update_testimonial',
+                "Updated testimonial ID #{$id} for '{$name}' (Rating: {$rating}★, Status: {$statusLabel}, Order: {$sortOrder})"
+            );
         } else {
             $s = db()->prepare('INSERT INTO testimonials (customer_name, review_text, rating, sort_order, active) VALUES (?,?,?,?,?)');
             $s->execute([$name, $review, $rating, $sortOrder, $active]);
+            $newId = (int)db()->lastInsertId();
+
+            // Audit Logging: Testimonial Created
+            $statusLabel = $active ? 'Visible' : 'Hidden';
+            log_admin_activity(
+                'reviews',
+                'create_testimonial',
+                "Created new testimonial ID #{$newId} for '{$name}' (Rating: {$rating}★, Status: {$statusLabel}, Order: {$sortOrder})"
+            );
         }
         flash('success', 'Testimonial saved.');
         redirect('admin/marketing/testimonials');
@@ -32,15 +49,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
-        db()->prepare('UPDATE testimonials SET active=1-active WHERE id=?')->execute([$id]);
-        flash('success', 'Testimonial state updated.');
+        $chk = db()->prepare('SELECT customer_name, active FROM testimonials WHERE id=?');
+        $chk->execute([$id]);
+        $rv = $chk->fetch();
+
+        if ($rv) {
+            db()->prepare('UPDATE testimonials SET active=1-active WHERE id=?')->execute([$id]);
+            $newState = empty($rv['active']) ? 'Active (Visible on homepage)' : 'Hidden';
+
+            // Audit Logging: Testimonial Visibility Toggle
+            log_admin_activity(
+                'reviews',
+                'toggle_testimonial_visibility',
+                "Toggled testimonial for '{$rv['customer_name']}' (ID #{$id}) to {$newState}"
+            );
+
+            flash('success', 'Testimonial state updated.');
+        }
         redirect('admin/marketing/testimonials');
     }
 
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
-        db()->prepare('DELETE FROM testimonials WHERE id=?')->execute([$id]);
-        flash('success', 'Testimonial deleted.');
+        $chk = db()->prepare('SELECT customer_name, rating FROM testimonials WHERE id=?');
+        $chk->execute([$id]);
+        $rv = $chk->fetch();
+
+        if ($rv) {
+            db()->prepare('DELETE FROM testimonials WHERE id=?')->execute([$id]);
+
+            // Audit Logging: Testimonial Deleted
+            log_admin_activity(
+                'reviews',
+                'delete_testimonial',
+                "Deleted customer testimonial ID #{$id} from '{$rv['customer_name']}' ({$rv['rating']}★)"
+            );
+
+            flash('success', 'Testimonial deleted.');
+        }
         redirect('admin/marketing/testimonials');
     }
 }

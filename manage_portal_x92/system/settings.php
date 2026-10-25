@@ -21,8 +21,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '<h3>SMTP Setup Working!</h3><p>This is a test email sent from your ' . e(store_name()) . ' admin panel.</p>'
             );
             if ($sent) {
+                // Audit Logging: SMTP Test Successful
+                log_admin_activity('settings', 'test_email', "Sent test verification email to {$testEmail} (Delivered successfully)");
                 flash('success', 'Test email sent successfully to ' . $testEmail);
             } else {
+                // Audit Logging: SMTP Test Failed
+                log_admin_activity('settings', 'test_email', "Failed attempt to send test verification email to {$testEmail}");
                 flash('error', 'Failed to send test email. Please check your SMTP settings and credentials.');
             }
         } else {
@@ -117,6 +121,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         site_setting_save('email_invoice_subject', $invoiceSubj);
         site_setting_save('invoice_footer_note', $invoiceNote);
 
+        $logoActivity = '';
+
         // Handle Logo Removal 
         if (!empty($_POST['remove_logo'])) {
             $old = site_setting('logo_url', '');
@@ -125,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (is_file($oldPath)) @unlink($oldPath);
             }
             site_setting_save('logo_url', '');
+            $logoActivity = ' [Logo removed]';
         }
 
         // Handle Logo Upload 
@@ -138,10 +145,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $filename = 'logo-' . bin2hex(random_bytes(12)) . '.' . $extensions[$mime];
                     if (move_uploaded_file($file['tmp_name'], $uploadDir . '/' . $filename)) {
                         site_setting_save('logo_url', $uploadUrl . '/' . $filename);
+                        $logoActivity = ' [New logo uploaded]';
                     }
                 }
             }
         }
+
+        // Audit Logging: Store Settings Saved
+        log_admin_activity(
+            'settings',
+            'save_settings',
+            "Updated store branding (Store: '{$name}', Logo Height: {$logoHeight}px), trust badges, SEO, and mail settings{$logoActivity}"
+        );
 
         flash('success', 'Store configuration, guarantees, and branding settings updated.');
         redirect('admin/system/settings');

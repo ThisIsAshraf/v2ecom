@@ -53,6 +53,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'login_logs') {
         redirect('admin/system/security');
     }
 
+    // Audit Logging: Login Logs Export
+    log_admin_activity('security', 'export_login_logs', 'Exported admin login attempt audit logs to CSV');
+
     $filename = 'login-audit-logs-' . date('Y-m-d-His') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
@@ -65,7 +68,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'login_logs') {
         $uaInfo = parse_user_agent($row['user_agent']);
         fputcsv($out, [
             $row['id'],
-            strtoupper($row['status']),
+            $row['status'],
             $row['email_attempted'],
             $row['ip_address'],
             $uaInfo['device'] . ' - ' . $uaInfo['browser'],
@@ -92,6 +95,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $upsert = $db->prepare('INSERT INTO site_settings (setting_key, setting_value) VALUES ("max_admin_sessions", ?) ON DUPLICATE KEY UPDATE setting_value = ?');
         $upsert->execute([(string)$maxVal, (string)$maxVal]);
 
+        // Audit Logging: Policy Adjustment
+        log_admin_activity('security', 'update_session_limit', "Changed max concurrent admin sessions limit to {$maxVal}");
+
         flash('success', 'Max concurrent admin sessions set to ' . $maxVal . '.');
         redirect('admin/system/security');
     }
@@ -100,19 +106,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'terminate_session') {
         $sessionId = trim((string)($_POST['session_id'] ?? ''));
 
-        $st = $db->prepare('SELECT admin_id FROM admin_sessions WHERE id = ?');
+        $st = $db->prepare('
+            SELECT s.admin_id, a.name, a.email, a.is_super_admin 
+            FROM admin_sessions s
+            JOIN admins a ON s.admin_id = a.id
+            WHERE s.id = ?
+        ');
         $st->execute([$sessionId]);
-        $targetAdminId = (int)$st->fetchColumn();
+        $targetSession = $st->fetch();
 
-        if ($targetAdminId > 0) {
-            $checkSuper = $db->prepare('SELECT is_super_admin FROM admins WHERE id = ?');
-            $checkSuper->execute([$targetAdminId]);
-            $targetIsSuper = (bool)$checkSuper->fetchColumn();
+        if ($targetSession) {
+            $targetIsSuper = (bool)$targetSession['is_super_admin'];
 
             if ($targetIsSuper && !is_super_admin()) {
                 flash('error', 'Action denied: Secondary admins cannot terminate a Super Admin session.');
             } else {
                 $db->prepare('DELETE FROM admin_sessions WHERE id = ?')->execute([$sessionId]);
+
+                // Audit Logging: Session Revocation
+                log_admin_activity(
+                    'security',
+                    'terminate_session',
+                    "Terminated active session ({$sessionId}) for admin: {$targetSession['name']} ({$targetSession['email']})"
+                );
+
                 flash('success', 'Admin session terminated successfully.');
             }
         }
@@ -145,14 +162,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $passHash = password_hash($password, PASSWORD_DEFAULT);
-        $permsJson = json_encode(array_values(array_intersect(array_keys($availablePermissions), (array)$perms)));
+        $assignedPerms = array_values(array_intersect(array_keys($availablePermissions), (array)$perms));
+        $permsJson = json_encode($assignedPerms);
 
         $ins = $db->prepare('INSERT INTO admins (name, email, password_hash, role, is_super_admin, permissions) VALUES (?, ?, ?, ?, 0, ?)');
         $ins->execute([$name, $email, $passHash, $role, $permsJson]);
+        $newAdminId = (int)$db->lastInsertId();
 
         if (function_exists('sync_htpasswd_user')) {
             sync_htpasswd_user($email, $password);
         }
+
+        // Audit Logging: Admin Created
+        $permList = $assignedPerms ? implode(', ', $assignedPerms) : 'None';
+        log_admin_activity(
+            'security',
+            'create_admin',
+            "Created secondary administrator '{$name}' ({$email}) with role '{$role}'. Permissions: [{$permList}]"
+        );
 
         flash('success', 'New admin account for ' . e($name) . ' created successfully.');
         redirect('admin/system/security');
@@ -170,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = (string)($_POST['password'] ?? '');
         $perms    = $_POST['permissions'] ?? [];
 
-        $chk = $db->prepare('SELECT is_super_admin, email FROM admins WHERE id = ?');
+        $chk = $db->prepare('SELECT is_super_admin, name, email FROM admins WHERE id = ?');
         $chk->execute([$adminId]);
         $targetAdmin = $chk->fetch();
 
@@ -180,7 +207,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $targetSuper = (bool)$targetAdmin['is_super_admin'];
-        $permsJson = $targetSuper ? null : json_encode(array_values(array_intersect(array_keys($availablePermissions), (array)$perms)));
+        $assignedPerms = array_values(array_intersect(array_keys($availablePermissions), (array)$perms));
+        $permsJson = $targetSuper ? null : json_encode($assignedPerms);
+
+        $passwordChanged = false;
 
         if ($password !== '') {
             if (strlen($password) < 6) {
@@ -194,10 +224,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (function_exists('sync_htpasswd_user') && !empty($targetAdmin['email'])) {
                 sync_htpasswd_user((string)$targetAdmin['email'], $password);
             }
+            $passwordChanged = true;
         } else {
             $up = $db->prepare('UPDATE admins SET role = ?, permissions = ? WHERE id = ?');
             $up->execute([$role, $permsJson, $adminId]);
         }
+
+        // Audit Logging: Admin Updated
+        $notes = [];
+        $notes[] = "role set to '{$role}'";
+        if (!$targetSuper) {
+            $permList = $assignedPerms ? implode(', ', $assignedPerms) : 'None';
+            $notes[] = "permissions: [{$permList}]";
+        }
+        if ($passwordChanged) {
+            $notes[] = 'password reset';
+        }
+        log_admin_activity(
+            'security',
+            'update_admin',
+            "Updated administrator '{$targetAdmin['name']}' ({$targetAdmin['email']}): " . implode('; ', $notes)
+        );
 
         flash('success', 'Admin account privileges and password updated successfully.');
         redirect('admin/system/security');
@@ -217,15 +264,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/system/security');
         }
 
-        $chk = $db->prepare('SELECT is_super_admin FROM admins WHERE id = ?');
+        $chk = $db->prepare('SELECT is_super_admin, name, email FROM admins WHERE id = ?');
         $chk->execute([$adminId]);
-        if ($chk->fetchColumn()) {
+        $targetAdmin = $chk->fetch();
+
+        if (!$targetAdmin) {
+            flash('error', 'Admin account not found.');
+            redirect('admin/system/security');
+        }
+
+        if ($targetAdmin['is_super_admin']) {
             flash('error', 'Action denied: Central Super Admin accounts cannot be deleted.');
             redirect('admin/system/security');
         }
 
         $db->prepare('DELETE FROM admin_sessions WHERE admin_id = ?')->execute([$adminId]);
         $db->prepare('DELETE FROM admins WHERE id = ?')->execute([$adminId]);
+
+        // Audit Logging: Admin Account Deleted
+        log_admin_activity(
+            'security',
+            'delete_admin',
+            "Deleted secondary administrator account '{$targetAdmin['name']}' ({$targetAdmin['email']}) and revoked sessions"
+        );
 
         flash('success', 'Administrator account removed successfully.');
         redirect('admin/system/security');
@@ -237,7 +298,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Action denied: Only Super Admins can purge security logs.');
             redirect('admin/system/security');
         }
+        $count = (int)$db->query('SELECT COUNT(*) FROM admin_login_logs')->fetchColumn();
         $db->query('DELETE FROM admin_login_logs');
+
+        // Audit Logging: Login Logs Purged
+        log_admin_activity('security', 'clear_login_logs', "Purged {$count} records from the admin login attempt audit ledger");
+
         flash('success', 'All login attempt logs have been cleared.');
         redirect('admin/system/security');
     }

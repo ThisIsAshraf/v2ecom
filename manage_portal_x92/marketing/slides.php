@@ -17,6 +17,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $active = isset($_POST['active']) ? 1 : 0;
         $img = trim((string)($_POST['image_url'] ?? ''));
 
+        $imageUploaded = false;
+
         if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] === UPLOAD_ERR_OK) {
             $tmpPath = $_FILES['image_file']['tmp_name'];
             $fileName = $_FILES['image_file']['name'];
@@ -27,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newFileName = 'hero_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
                 if (move_uploaded_file($tmpPath, $uploadDir . $newFileName)) {
                     $img = 'uploads/' . $newFileName;
+                    $imageUploaded = true;
                 }
             }
         }
@@ -36,12 +39,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/marketing/slides');
         }
 
+        $statusLabel = $active ? 'Visible' : 'Hidden';
+        $uploadNote = $imageUploaded ? ' (New image uploaded)' : '';
+
         if ($id) {
             $s = db()->prepare('UPDATE hero_slides SET title=?, subtitle=?, eyebrow=?, button_text=?, button_url=?, image_url=?, sort_order=?, active=? WHERE id=?');
             $s->execute([$title, $subtitle, $eyebrow, $buttonText, $buttonUrl, $img, $sortOrder, $active, $id]);
+
+            // Audit Logging: Slide Updated
+            log_admin_activity(
+                'slides',
+                'update_slide',
+                "Updated hero slide ID #{$id} ('{$title}'): Status: {$statusLabel}, Order: {$sortOrder}, Button: '{$buttonText}' -> '{$buttonUrl}'{$uploadNote}"
+            );
         } else {
             $s = db()->prepare('INSERT INTO hero_slides (title, subtitle, eyebrow, button_text, button_url, image_url, sort_order, active) VALUES (?,?,?,?,?,?,?,?)');
             $s->execute([$title, $subtitle, $eyebrow, $buttonText, $buttonUrl, $img, $sortOrder, $active]);
+            $newId = (int)db()->lastInsertId();
+
+            // Audit Logging: Slide Created
+            log_admin_activity(
+                'slides',
+                'create_slide',
+                "Created new hero slide ID #{$newId} ('{$title}'): Status: {$statusLabel}, Order: {$sortOrder}, Button: '{$buttonText}' -> '{$buttonUrl}'{$uploadNote}"
+            );
         }
         flash('success', 'Hero slide saved.');
         redirect('admin/marketing/slides');
@@ -49,15 +70,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
-        db()->prepare('UPDATE hero_slides SET active=1-active WHERE id=?')->execute([$id]);
-        flash('success', 'Slide state updated.');
+        $chk = db()->prepare('SELECT title, active FROM hero_slides WHERE id=?');
+        $chk->execute([$id]);
+        $sl = $chk->fetch();
+
+        if ($sl) {
+            db()->prepare('UPDATE hero_slides SET active=1-active WHERE id=?')->execute([$id]);
+            $newState = empty($sl['active']) ? 'Active (Visible on homepage)' : 'Hidden';
+
+            // Audit Logging: Slide Status Toggled
+            log_admin_activity(
+                'slides',
+                'toggle_slide_visibility',
+                "Toggled hero slide '{$sl['title']}' (ID #{$id}) status to {$newState}"
+            );
+
+            flash('success', 'Slide state updated.');
+        }
         redirect('admin/marketing/slides');
     }
 
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
-        db()->prepare('DELETE FROM hero_slides WHERE id=?')->execute([$id]);
-        flash('success', 'Slide deleted.');
+        $chk = db()->prepare('SELECT title, image_url FROM hero_slides WHERE id=?');
+        $chk->execute([$id]);
+        $sl = $chk->fetch();
+
+        if ($sl) {
+            // Delete associated upload if stored locally
+            if (!empty($sl['image_url']) && str_starts_with($sl['image_url'], 'uploads/')) {
+                $filePath = dirname(__DIR__, 2) . '/' . $sl['image_url'];
+                if (is_file($filePath)) @unlink($filePath);
+            }
+
+            db()->prepare('DELETE FROM hero_slides WHERE id=?')->execute([$id]);
+
+            // Audit Logging: Slide Deleted
+            log_admin_activity(
+                'slides',
+                'delete_slide',
+                "Deleted hero banner slide ID #{$id} ('{$sl['title']}')"
+            );
+
+            flash('success', 'Slide deleted.');
+        }
         redirect('admin/marketing/slides');
     }
 }

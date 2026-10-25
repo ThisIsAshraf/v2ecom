@@ -17,8 +17,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
 
     if ($action === 'save_theme') {
+        $primaryColor = trim((string)($_POST['theme_primary_color'] ?? '#2c3e50'));
+
         // Theme Colors
-        site_setting_save('theme_primary_color', trim((string)($_POST['theme_primary_color'] ?? '#2c3e50')));
+        site_setting_save('theme_primary_color', $primaryColor);
         site_setting_save('theme_header_bg', trim((string)($_POST['theme_header_bg'] ?? '#1a252f')));
         site_setting_save('theme_announcement_text', trim((string)($_POST['theme_announcement_text'] ?? '#ffffff')));
         site_setting_save('theme_body_bg', trim((string)($_POST['theme_body_bg'] ?? '#f8f9fa')));
@@ -59,6 +61,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         site_setting_save('social_whatsapp', trim((string)($_POST['social_whatsapp'] ?? '')));
         site_setting_save('social_tiktok', trim((string)($_POST['social_tiktok'] ?? '')));
         site_setting_save('social_youtube', trim((string)($_POST['social_youtube'] ?? '')));
+
+        // Audit Logging: Custom Theme & Typography Update
+        log_admin_activity(
+            'theme',
+            'save_theme',
+            "Updated storefront theme styles, sectional typography, footer details, and social links (Primary: {$primaryColor})"
+        );
 
         flash('success', 'Storefront theme, sectional typography, footer, and social links updated successfully.');
         redirect('admin/system/theme');
@@ -105,20 +114,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             site_setting_save('theme_footer_text', '#ffffff');
         }
 
+        // Audit Logging: Theme Preset Applied
+        log_admin_activity(
+            'theme',
+            'apply_preset',
+            "Applied '" . ucfirst($preset) . "' storefront color theme preset"
+        );
+
         flash('success', 'Applied ' . ucfirst($preset) . ' theme preset.');
         redirect('admin/system/theme');
     }
 }
 
 // Current Color Settings
-$themePrimary     = site_setting('theme_primary_color', '#2c3e50');
-$themeHeaderBg    = site_setting('theme_header_bg', '#1a252f');
+$themePrimary      = site_setting('theme_primary_color', '#2c3e50');
+$themeHeaderBg     = site_setting('theme_header_bg', '#1a252f');
 $themeAnnounceText = site_setting('theme_announcement_text', '#ffffff');
-$themeBodyBg      = site_setting('theme_body_bg', '#f8f9fa');
-$themeCardBg      = site_setting('theme_card_bg', '#ffffff');
-$themeBorder      = site_setting('theme_border_color', '#e0e0e0');
-$themeFooterBg    = site_setting('theme_footer_bg', '#111111');
-$themeFooterText  = site_setting('theme_footer_text', '#ffffff');
+$themeBodyBg       = site_setting('theme_body_bg', '#f8f9fa');
+$themeCardBg       = site_setting('theme_card_bg', '#ffffff');
+$themeBorder       = site_setting('theme_border_color', '#e0e0e0');
+$themeFooterBg     = site_setting('theme_footer_bg', '#111111');
+$themeFooterText   = site_setting('theme_footer_text', '#ffffff');
 
 // Current Sectional Typography Settings
 $navFont     = site_setting('font_nav_family', 'Inter, sans-serif');
@@ -364,7 +380,7 @@ admin_header('Storefront Theme & Footer Control'); ?>
             </div>
         </div>
 
-        <hr style="margin:25px 0; border:0; border-top:1px solid #eee;">
+        <hr style="margin:25px 0; border:0; border-top:1px solid var(--line,#eee);">
 
         <h2>Social Media Links</h2>
         <div class="form-grid">

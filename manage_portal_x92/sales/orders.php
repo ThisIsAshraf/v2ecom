@@ -28,6 +28,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
 
+    // Audit Logging: Order Export Activity
+    $filterDesc = [];
+    if ($statusFilter !== '') $filterDesc[] = "status: {$statusFilter}";
+    if ($search !== '') $filterDesc[] = "search: '{$search}'";
+    $filterText = $filterDesc ? ' with filters (' . implode(', ', $filterDesc) . ')' : ' (all orders)';
+    log_admin_activity('orders', 'export_csv', 'Exported orders ledger to CSV' . $filterText);
+
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Order Number', 'Date', 'Customer Name', 'Email', 'Phone', 'City', 'Subtotal', 'Discount', 'Shipping', 'Total', 'Status']);
 
@@ -87,6 +94,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['admin_id'] ?? null
             ]);
             $pdo->commit();
+
+            // Audit Logging: Order Status Update
+            $activityNote = "Updated Order #{$order['order_number']} from " . ucfirst($oldStatus) . ' to ' . ucfirst($status);
+            if ($oldStatus !== $status && $status === 'confirmed') {
+                $activityNote .= ' (Tax invoice email sent to ' . $order['customer_email'] . ')';
+            }
+            log_admin_activity('orders', 'update_status', $activityNote);
 
             // Trigger Official Invoice Email ONLY to Customer when Order is Confirmed
             if ($oldStatus !== 'confirmed' && $status === 'confirmed') {

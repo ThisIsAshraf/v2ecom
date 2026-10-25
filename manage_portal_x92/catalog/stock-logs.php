@@ -18,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->beginTransaction();
 
         try {
-            $s = $pdo->prepare('SELECT id, name, stock FROM products WHERE id = ? FOR UPDATE');
+            $s = $pdo->prepare('SELECT id, name, sku, stock FROM products WHERE id = ? FOR UPDATE');
             $s->execute([$productId]);
             $product = $s->fetch();
 
@@ -44,11 +44,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $update = $pdo->prepare('UPDATE products SET stock = ? WHERE id = ?');
             $update->execute([$newStock, $productId]);
 
-            // Record log entry
+            // Record log entry in stock_logs
+            $finalNote = $note ?: 'Manual adjustment';
             $log = $pdo->prepare('INSERT INTO stock_logs (product_id, admin_id, change_type, quantity, old_stock, new_stock, note) VALUES (?, ?, ?, ?, ?, ?, ?)');
-            $log->execute([$productId, $adminId, $changeType, $qty, $oldStock, $newStock, $note ?: 'Manual adjustment']);
+            $log->execute([$productId, $adminId, $changeType, $qty, $oldStock, $newStock, $finalNote]);
 
             $pdo->commit();
+
+            // Central Audit Logging
+            $actionLabel = strtoupper($changeType);
+            log_admin_activity(
+                'products',
+                'adjust_stock',
+                "Adjusted inventory for '{$product['name']}' (SKU: {$product['sku']}): {$actionLabel} ({$oldStock} → {$newStock}). Reason: '{$finalNote}'"
+            );
+
             flash('success', 'Stock updated for ' . $product['name'] . ' (' . $oldStock . ' → ' . $newStock . ').');
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();

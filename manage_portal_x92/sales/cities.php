@@ -23,6 +23,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $ins = $db->prepare('INSERT INTO shipping_cities (city_name, zone_code, shipping_cost) VALUES (?, ?, ?)');
                 $ins->execute([$cityName, $zoneCode, $shippingCost]);
+                $newId = (int)$db->lastInsertId();
+
+                // Audit Logging: Delivery City Created
+                $zoneLabel = $zoneCode === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka';
+                log_admin_activity(
+                    'settings',
+                    'create_shipping_city',
+                    "Added delivery city '{$cityName}' (ID #{$newId}, Zone: {$zoneLabel}, Rate: " . money($shippingCost) . ')'
+                );
+
                 flash('success', 'New delivery location "' . e($cityName) . '" added successfully.');
             } catch (Throwable $e) {
                 flash('error', 'Location already exists or invalid data provided.');
@@ -42,8 +52,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Invalid city details.');
         } else {
             try {
+                // Fetch prior details for accurate audit record
+                $chk = $db->prepare('SELECT city_name, zone_code, shipping_cost FROM shipping_cities WHERE id = ?');
+                $chk->execute([$cityId]);
+                $old = $chk->fetch();
+
                 $up = $db->prepare('UPDATE shipping_cities SET city_name = ?, zone_code = ?, shipping_cost = ? WHERE id = ?');
                 $up->execute([$cityName, $zoneCode, $shippingCost, $cityId]);
+
+                // Audit Logging: Delivery City Updated
+                $oldName = $old['city_name'] ?? "ID #{$cityId}";
+                $oldZone = ($old['zone_code'] ?? '') === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka';
+                $newZone = $zoneCode === 'inside_dhaka' ? 'Inside Dhaka' : 'Outside Dhaka';
+                log_admin_activity(
+                    'settings',
+                    'update_shipping_city',
+                    "Updated delivery city ID #{$cityId} ('{$oldName}' → '{$cityName}'): Zone [{$oldZone} → {$newZone}], Rate [" . money($old['shipping_cost'] ?? 0) . ' → ' . money($shippingCost) . ']'
+                );
+
                 flash('success', 'Delivery rate for "' . e($cityName) . '" updated successfully.');
             } catch (Throwable $e) {
                 flash('error', 'Failed to update delivery city.');
@@ -56,7 +82,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete_city') {
         $cityId = (int)($_POST['city_id'] ?? 0);
         if ($cityId > 0) {
+            $chk = $db->prepare('SELECT city_name, zone_code FROM shipping_cities WHERE id = ?');
+            $chk->execute([$cityId]);
+            $city = $chk->fetch();
+            $targetName = $city['city_name'] ?? "ID #{$cityId}";
+
             $db->prepare('DELETE FROM shipping_cities WHERE id = ?')->execute([$cityId]);
+
+            // Audit Logging: Delivery City Deleted
+            log_admin_activity(
+                'settings',
+                'delete_shipping_city',
+                "Deleted delivery city '{$targetName}' (ID #{$cityId})"
+            );
+
             flash('success', 'Delivery city removed.');
         }
         redirect('admin/sales/cities');

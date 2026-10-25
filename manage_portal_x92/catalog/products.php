@@ -21,6 +21,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
 
+    // Audit Logging: Product Export
+    log_admin_activity('products', 'export_csv', 'Exported products inventory catalog to CSV');
+
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Product ID', 'Name', 'SKU', 'Category', 'Price', 'Compare-at Price', 'Stock', 'Status', 'Image URL']);
 
@@ -117,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $insCat = db()->prepare('INSERT INTO categories (name, slug) VALUES (?, ?)');
                     $insCat->execute([$catName, $catSlug]);
                     $catId = (int)db()->lastInsertId();
+                    log_admin_activity('categories', 'auto_create', "Auto-created category '{$catName}' during bulk CSV import");
                 }
             }
 
@@ -139,6 +143,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         fclose($handle);
 
+        // Audit Logging: Bulk Import Summary
+        log_admin_activity('products', 'import_csv', "Bulk CSV Import: {$imported} new products inserted, {$updated} updated, {$skipped} skipped");
+
         flash('success', "Bulk Import Complete: $imported new products inserted, $updated existing updated, $skipped skipped due to invalid data.");
         redirect('admin/catalog/products');
     }
@@ -154,6 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $filePath = dirname(__DIR__, 2) . '/' . $img['image_url'];
             if (is_file($filePath)) @unlink($filePath);
             db()->prepare('DELETE FROM product_images WHERE id=?')->execute([$imgId]);
+
+            // Audit Logging: Gallery Image Removal
+            log_admin_activity('products', 'delete_gallery_image', "Deleted gallery image ID #{$imgId} from Product ID #{$prodId}");
             flash('success', 'Gallery image deleted.');
         }
         redirect('admin/catalog/products?edit=' . $prodId);
@@ -180,6 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $insCat = db()->prepare('INSERT INTO categories (name, slug) VALUES (?, ?)');
                 $insCat->execute([$newCatName, $catSlug]);
                 $cat = (int)db()->lastInsertId();
+                log_admin_activity('categories', 'create_category', "Created category '{$newCatName}' while saving product '{$name}'");
             }
         }
 
@@ -214,13 +225,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $s = db()->prepare('UPDATE products SET category_id=?,name=?,slug=?,sku=?,description=?,price=?,compare_price=?,image_url=?,stock=?,active=? WHERE id=?');
                 $s->execute([$cat, $name, $slug, $sku, $desc, $price, $compare ?: null, $img, $stock, $active, $id]);
                 $productId = $id;
+
+                // Audit Logging: Product Edit
+                log_admin_activity('products', 'update_product', "Updated product '{$name}' (ID: #{$id}, SKU: {$sku}, Price: {$price}, Stock: {$stock})");
             } else {
                 $s = db()->prepare('INSERT INTO products(category_id,name,slug,sku,description,price,compare_price,image_url,stock,active) VALUES(?,?,?,?,?,?,?,?,?,?)');
                 $s->execute([$cat, $name, $slug, $sku, $desc, $price, $compare ?: null, $img, $stock, $active]);
                 $productId = (int)db()->lastInsertId();
+
+                // Audit Logging: Product Creation
+                log_admin_activity('products', 'create_product', "Created new product '{$name}' (ID: #{$productId}, SKU: {$sku}, Price: {$price}, Stock: {$stock})");
             }
 
             // Upload Multiple Gallery Images
+            $uploadedGalleryCount = 0;
             if (!empty($_FILES['gallery_files']['name'][0])) {
                 $uploadDir = dirname(__DIR__, 2) . '/uploads/';
                 if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
@@ -234,10 +252,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if (move_uploaded_file($tmp, $uploadDir . $gName)) {
                                 db()->prepare('INSERT INTO product_images (product_id, image_url) VALUES (?, ?)')
                                     ->execute([$productId, 'uploads/' . $gName]);
+                                $uploadedGalleryCount++;
                             }
                         }
                     }
                 }
+            }
+
+            if ($uploadedGalleryCount > 0) {
+                log_admin_activity('products', 'upload_gallery', "Uploaded {$uploadedGalleryCount} gallery images to product ID #{$productId} ('{$name}')");
             }
 
             flash('success', 'Product saved.');
@@ -250,7 +273,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
+        $checkStmt = db()->prepare('SELECT name, active FROM products WHERE id=?');
+        $checkStmt->execute([$id]);
+        $prod = $checkStmt->fetch();
+
         db()->prepare('UPDATE products SET active=1-active WHERE id=?')->execute([$id]);
+
+        if ($prod) {
+            $newStatus = empty($prod['active']) ? 'Active (Visible)' : 'Hidden';
+            log_admin_activity('products', 'toggle_visibility', "Toggled visibility for '{$prod['name']}' (ID #{$id}) to {$newStatus}");
+        }
+
         flash('success', 'Product visibility updated.');
         redirect('admin/catalog/products');
     }

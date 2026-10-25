@@ -38,10 +38,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $apiKey      = 'db_' . bin2hex(random_bytes(16));
         $secretToken = bin2hex(random_bytes(32));
-        $scopesJson  = json_encode(array_values(array_intersect(array_keys($availableScopes), (array)$scopes)));
+        $assignedScopes = array_values(array_intersect(array_keys($availableScopes), (array)$scopes));
+        $scopesJson  = json_encode($assignedScopes);
 
         $ins = $db->prepare('INSERT INTO api_keys (key_name, api_key, secret_token, status, scopes, rate_limit) VALUES (?, ?, ?, "active", ?, ?)');
         $ins->execute([$keyName, $apiKey, password_hash($secretToken, PASSWORD_DEFAULT), $scopesJson, $rateLimit]);
+        $newKeyId = (int)$db->lastInsertId();
+
+        // Audit Logging: API Key Created
+        $scopesList = $assignedScopes ? implode(', ', $assignedScopes) : 'None';
+        log_admin_activity(
+            'security',
+            'create_api_key',
+            "Generated API Key '{$keyName}' (ID #{$newKeyId}, Key: {$apiKey}, Limit: {$rateLimit}/day). Scopes: [{$scopesList}]"
+        );
 
         $_SESSION['new_api_secret'] = $secretToken;
         flash('success', 'API Key created successfully. Make sure to copy your Secret Token below!');
@@ -51,8 +61,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 2. Toggle Status (Active / Inactive)
     if ($action === 'toggle_status') {
         $keyId = (int)($_POST['key_id'] ?? 0);
-        $db->prepare('UPDATE api_keys SET status = IF(status = "active", "inactive", "active") WHERE id = ?')->execute([$keyId]);
-        flash('success', 'API Key status updated.');
+
+        // Fetch prior details for accurate audit record
+        $chk = $db->prepare('SELECT key_name, api_key, status FROM api_keys WHERE id = ?');
+        $chk->execute([$keyId]);
+        $key = $chk->fetch();
+
+        if ($key) {
+            $newStatus = $key['status'] === 'active' ? 'inactive' : 'active';
+            $db->prepare('UPDATE api_keys SET status = ? WHERE id = ?')->execute([$newStatus, $keyId]);
+
+            // Audit Logging: API Key Status Toggled
+            $stateLabel = ucfirst($newStatus);
+            log_admin_activity(
+                'security',
+                'toggle_api_key_status',
+                "Toggled API Key '{$key['key_name']}' ({$key['api_key']}, ID #{$keyId}) status to {$stateLabel}"
+            );
+
+            flash('success', 'API Key status updated.');
+        }
         redirect('admin/system/api-keys');
     }
 
@@ -63,8 +91,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/system/api-keys');
         }
         $keyId = (int)($_POST['key_id'] ?? 0);
-        $db->prepare('DELETE FROM api_keys WHERE id = ?')->execute([$keyId]);
-        flash('success', 'API Key revoked and permanently deleted.');
+
+        $chk = $db->prepare('SELECT key_name, api_key FROM api_keys WHERE id = ?');
+        $chk->execute([$keyId]);
+        $key = $chk->fetch();
+
+        if ($key) {
+            $db->prepare('DELETE FROM api_keys WHERE id = ?')->execute([$keyId]);
+
+            // Audit Logging: API Key Revoked
+            log_admin_activity(
+                'security',
+                'revoke_api_key',
+                "Permanently revoked and deleted API Key '{$key['key_name']}' ({$key['api_key']}, ID #{$keyId})"
+            );
+
+            flash('success', 'API Key revoked and permanently deleted.');
+        }
         redirect('admin/system/api-keys');
     }
 }
@@ -139,6 +182,11 @@ unset($_SESSION['new_api_secret']);
                     </td>
                 </tr>
             <?php endforeach; ?>
+            <?php if (!$apiKeys): ?>
+                <tr>
+                    <td colspan="6" style="text-align:center; padding:20px;" class="muted">No API keys generated yet.</td>
+                </tr>
+            <?php endif; ?>
         </tbody>
     </table>
 </div>

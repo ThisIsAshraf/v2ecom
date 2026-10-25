@@ -18,6 +18,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $filename = strtolower(preg_replace('/[^A-Za-z0-9]+/', '-', store_name())) . '-customers-' . date('Y-m-d-His') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    // Audit Logging: Customer Directory Export
+    $filterNote = $search !== '' ? " with search filter: '{$search}'" : " (all customers)";
+    log_admin_activity('customers', 'export_csv', 'Exported customer directory and spending intelligence to CSV' . $filterNote);
+
     $out = fopen('php://output', 'w');
 
     // Header Row
@@ -100,6 +105,13 @@ if (isset($_GET['inspect_email'])) {
     $customerOrders = $s->fetchAll();
     if ($customerOrders) {
         $inspectCustomer = $customerOrders[0];
+
+        // Audit Logging: Customer History Inspected
+        log_admin_activity(
+            'customers',
+            'inspect_history',
+            "Inspected order history and metrics for customer: {$inspectCustomer['customer_name']} ({$inspectEmail})"
+        );
     }
 }
 

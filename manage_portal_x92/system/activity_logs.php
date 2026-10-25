@@ -13,6 +13,14 @@ $moduleFilter = trim((string)($_GET['module'] ?? ''));
 
 // CSV Export Handler
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $filterDesc = [];
+    if ($moduleFilter !== '') $filterDesc[] = "module: {$moduleFilter}";
+    if ($search !== '') $filterDesc[] = "search: '{$search}'";
+    $filterText = $filterDesc ? ' (' . implode(', ', $filterDesc) . ')' : ' (full ledger)';
+
+    // Audit Logging: Record export action before streaming
+    log_admin_activity('security', 'export_activity_logs', 'Exported admin activity audit trail to CSV' . $filterText);
+
     $filename = 'admin-activity-audit-' . date('Y-m-d-His') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
@@ -57,9 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string)($_POST['action'] ?? '');
     if ($action === 'clear_all_activities') {
+        $count = (int)$db->query('SELECT COUNT(*) FROM admin_activity_logs')->fetchColumn();
         $db->query('TRUNCATE TABLE admin_activity_logs');
-        log_admin_activity('security', 'purge_logs', 'Purged all system activity audit trail logs');
-        flash('success', 'All activity audit logs have been successfully cleared.');
+        log_admin_activity('security', 'purge_logs', "Purged {$count} records from the system activity audit trail");
+        flash('success', "All {$count} activity audit logs have been successfully cleared.");
         redirect('admin/system/activity-logs');
     }
 }
@@ -118,13 +127,15 @@ admin_header('System Activity & Audit Trail');
                 📥 Export CSV
             </a>
 
-            <form method="post" action="<?= e(url('admin/system/activity-logs')) ?>" onsubmit="return confirm('Permanently clear all activity audit logs? This cannot be undone.');" style="margin:0;">
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="clear_all_activities">
-                <button class="button secondary danger" style="padding:6px 14px; font-size:12px; background:#fde8e8; color:#e74c3c;">
-                    Clear Activity Logs
-                </button>
-            </form>
+            <?php if (!empty($totalLogs)): ?>
+                <form method="post" action="<?= e(url('admin/system/activity-logs')) ?>" onsubmit="return confirm('Permanently clear all activity audit logs? This cannot be undone.');" style="margin:0;">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="clear_all_activities">
+                    <button class="button secondary danger" style="padding:6px 14px; font-size:12px; background:#fde8e8; color:#e74c3c;">
+                        Clear Activity Logs
+                    </button>
+                </form>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -160,6 +171,17 @@ admin_header('System Activity & Audit Trail');
             </thead>
             <tbody>
                 <?php foreach ($logs as $l): ?>
+                    <?php
+                    $modLower = strtolower($l['module']);
+                    $badgeStyle = match ($modLower) {
+                        'security', 'env'      => 'background:#fee2e2; color:#991b1b; border:1px solid #fecaca;',
+                        'orders'               => 'background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;',
+                        'products', 'categories' => 'background:#fef3c7; color:#92400e; border:1px solid #fde68a;',
+                        'settings', 'theme'    => 'background:#f3e8ff; color:#6b21a8; border:1px solid #e9d5ff;',
+                        'customers'            => 'background:#dcfce7; color:#166534; border:1px solid #bbf7d0;',
+                        default                => 'background:#eef2f7; color:#2c3e50; border:1px solid #cbd5e1;',
+                    };
+                    ?>
                     <tr>
                         <td style="white-space:nowrap; font-size:12px; color:#555;">
                             <?= date('M d, Y', strtotime($l['created_at'])) ?><br>
@@ -170,7 +192,7 @@ admin_header('System Activity & Audit Trail');
                             <span class="small muted"><?= e($l['admin_email'] ?: '—') ?></span>
                         </td>
                         <td>
-                            <span class="status" style="padding:3px 8px; border-radius:4px; font-size:11px; font-weight:bold; background:#eef2f7; color:#2c3e50;">
+                            <span class="status" style="padding:3px 8px; border-radius:4px; font-size:11px; font-weight:bold; <?= $badgeStyle ?>">
                                 <?= strtoupper(e($l['module'])) ?>
                             </span>
                         </td>
@@ -180,8 +202,13 @@ admin_header('System Activity & Audit Trail');
                         <td style="font-size:13px; max-width:350px;">
                             <?= e($l['description']) ?>
                         </td>
-                        <td>
+                        <td style="white-space:nowrap;">
                             <code><?= e($l['ip_address']) ?></code>
+                            <?php if ($l['ip_address'] && $l['ip_address'] !== '127.0.0.1' && $l['ip_address'] !== '::1'): ?>
+                                <a href="https://ipinfo.io/<?= e($l['ip_address']) ?>" target="_blank" rel="noopener" style="font-size:11px; margin-left:4px; color:#2563eb; text-decoration:none;">
+                                    🌐
+                                </a>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>

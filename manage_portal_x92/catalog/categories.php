@@ -19,11 +19,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             if ($id) {
+                // Fetch previous details for accurate audit record
+                $chk = db()->prepare('SELECT name, slug FROM categories WHERE id = ?');
+                $chk->execute([$id]);
+                $old = $chk->fetch();
+
                 $s = db()->prepare('UPDATE categories SET name=?, slug=? WHERE id=?');
                 $s->execute([$name, $slug, $id]);
+
+                // Audit Logging: Category Updated
+                $oldName = $old['name'] ?? 'Unknown';
+                log_admin_activity('categories', 'update_category', "Updated category ID #{$id}: Renamed from '{$oldName}' to '{$name}' (slug: '{$slug}')");
             } else {
                 $s = db()->prepare('INSERT INTO categories (name, slug) VALUES (?, ?)');
                 $s->execute([$name, $slug]);
+                $newId = (int)db()->lastInsertId();
+
+                // Audit Logging: Category Created
+                log_admin_activity('categories', 'create_category', "Created new category '{$name}' (ID #{$newId}, slug: '{$slug}')");
             }
             flash('success', 'Category saved successfully.');
         } catch (Throwable $e) {
@@ -36,9 +49,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
 
+        // Fetch details before deletion for audit trail
+        $chk = db()->prepare('
+            SELECT c.name, COUNT(p.id) AS product_count 
+            FROM categories c 
+            LEFT JOIN products p ON p.category_id = c.id 
+            WHERE c.id = ? 
+            GROUP BY c.id
+        ');
+        $chk->execute([$id]);
+        $cat = $chk->fetch();
+        $catName = $cat['name'] ?? "ID #{$id}";
+        $prodCount = (int)($cat['product_count'] ?? 0);
+
         // Unlink products assigned to this category before removing it
         db()->prepare('UPDATE products SET category_id = NULL WHERE category_id = ?')->execute([$id]);
         db()->prepare('DELETE FROM categories WHERE id = ?')->execute([$id]);
+
+        // Audit Logging: Category Deleted
+        log_admin_activity('categories', 'delete_category', "Deleted category '{$catName}' (ID #{$id}). {$prodCount} associated product(s) marked as uncategorised.");
 
         flash('success', 'Category deleted. Associated products are now marked as uncategorised.');
         redirect('admin/catalog/categories');

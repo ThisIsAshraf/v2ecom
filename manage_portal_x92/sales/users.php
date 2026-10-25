@@ -32,6 +32,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $filename = strtolower(preg_replace('/[^A-Za-z0-9]+/', '-', store_name())) . '-users-' . date('Y-m-d-His') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    // Audit Logging: User Directory Export
+    $filterNote = $search !== '' ? " with search filter: '{$search}'" : " (all users)";
+    log_admin_activity('customers', 'export_users_csv', 'Exported registered user accounts to CSV' . $filterNote);
+
     $out = fopen('php://output', 'w');
 
     fputcsv($out, ['User ID', 'Name', 'Email Address', 'Phone Number', 'City', 'Address', 'Status', 'Total Orders', 'Registered Date']);
@@ -132,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $existingUser = $checkUser->fetch();
 
             if ($existingUser) {
-                // Update profile info (preserve existing password unless explicit raw password passed)
+                // Update profile info
                 $up = db()->prepare('UPDATE users SET name=?, phone=?, city=?, address=?, status=? WHERE id=?');
                 $up->execute([$name, $phone ?: null, $city ?: null, $address ?: null, $status, $existingUser['id']]);
                 $updated++;
@@ -146,13 +151,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         fclose($handle);
 
+        // Audit Logging: Bulk User Import
+        log_admin_activity(
+            'customers',
+            'import_users_csv',
+            "Bulk User Import: {$imported} accounts created, {$updated} updated, {$skipped} skipped"
+        );
+
         flash('success', "User Import Complete: $imported new users created, $updated updated, $skipped skipped due to invalid data.");
         redirect('admin/sales/users');
     }
 
     if ($action === 'toggle_status') {
-        db()->prepare('UPDATE users SET status = IF(status="active","blocked","active") WHERE id=?')->execute([$userId]);
-        flash('success', 'User account status updated.');
+        $st = db()->prepare('SELECT name, email, status FROM users WHERE id=?');
+        $st->execute([$userId]);
+        $u = $st->fetch();
+
+        if ($u) {
+            $newStatus = $u['status'] === 'active' ? 'blocked' : 'active';
+            db()->prepare('UPDATE users SET status=? WHERE id=?')->execute([$newStatus, $userId]);
+
+            // Audit Logging: User Status Toggle
+            $verb = $newStatus === 'blocked' ? 'Blocked' : 'Unblocked';
+            log_admin_activity(
+                'customers',
+                'toggle_user_status',
+                "{$verb} user account '{$u['name']}' ({$u['email']}, ID #{$userId})"
+            );
+
+            flash('success', 'User account status updated.');
+        }
     } elseif ($action === 'reset_pass') {
         $st = db()->prepare('SELECT email, name FROM users WHERE id=?');
         $st->execute([$userId]);
@@ -162,6 +190,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $hash = password_hash($tempPass, PASSWORD_DEFAULT);
             db()->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([$hash, $userId]);
             email_user_password_reset($u['email'], $u['name'], $tempPass);
+
+            // Audit Logging: User Password Reset
+            log_admin_activity(
+                'customers',
+                'reset_user_password',
+                "Reset password and emailed temporary credentials to user '{$u['name']}' ({$u['email']}, ID #{$userId})"
+            );
+
             flash('success', 'Temporary password sent to ' . $u['email']);
         }
     }

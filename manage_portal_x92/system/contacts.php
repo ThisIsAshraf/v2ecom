@@ -35,8 +35,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (send_store_email($msg['email'], $msg['name'], $subject, $emailHtml)) {
             db()->prepare("UPDATE contacts SET status='replied' WHERE id=?")->execute([$id]);
+
+            // Audit Logging: Reply Sent
+            log_admin_activity(
+                'contacts',
+                'send_reply',
+                "Sent email reply to {$msg['name']} ({$msg['email']}) for inquiry ID #{$id} [Subject: '{$msg['subject']}']"
+            );
+
             flash('success', 'Reply sent successfully to ' . $msg['email']);
         } else {
+            // Audit Logging: Failed Reply Delivery
+            log_admin_activity(
+                'contacts',
+                'send_reply_failed',
+                "Failed to send email reply to {$msg['name']} ({$msg['email']}) for inquiry ID #{$id}"
+            );
+
             flash('error', 'Could not send email. Please verify SMTP settings in your .env file.');
         }
 
@@ -46,8 +61,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'update_status') {
         $status = (string)($_POST['status'] ?? 'read');
         if (in_array($status, ['new', 'read', 'replied', 'closed'], true)) {
-            db()->prepare('UPDATE contacts SET status=? WHERE id=?')->execute([$status, $id]);
-            flash('success', 'Message status updated.');
+            $s = db()->prepare('SELECT name, email, subject, status FROM contacts WHERE id=?');
+            $s->execute([$id]);
+            $msg = $s->fetch();
+
+            if ($msg) {
+                db()->prepare('UPDATE contacts SET status=? WHERE id=?')->execute([$status, $id]);
+
+                // Audit Logging: Status Updated
+                log_admin_activity(
+                    'contacts',
+                    'update_status',
+                    "Changed message status for '{$msg['name']}' ({$msg['email']}, ID #{$id}) from " . ucfirst($msg['status']) . ' to ' . ucfirst($status)
+                );
+
+                flash('success', 'Message status updated.');
+            }
         }
         redirect('admin/system/contacts' . ($id ? '?id=' . $id : ''));
     }
@@ -60,6 +89,13 @@ if (isset($_GET['id'])) {
     $detail = $s->fetch();
     if ($detail && $detail['status'] === 'new') {
         db()->prepare("UPDATE contacts SET status='read' WHERE id=?")->execute([$detail['id']]);
+
+        // Audit Logging: Marked as Read
+        log_admin_activity(
+            'contacts',
+            'read_message',
+            "Opened and marked inquiry ID #{$detail['id']} from '{$detail['name']}' ({$detail['email']}) as read"
+        );
     }
 }
 
