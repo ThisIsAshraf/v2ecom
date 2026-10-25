@@ -7,6 +7,64 @@ $uploadUrl = 'uploads';
 
 if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
 
+// Helper to update specific key-value pairs in root .env file without altering unrelated lines
+function sync_env_variables(array $updates): bool
+{
+    $envPath = dirname(__DIR__, 2) . '/.env';
+    $backupPath = dirname(__DIR__, 2) . '/.env.backup';
+
+    if (!is_file($envPath)) {
+        return false;
+    }
+
+    $lines = file($envPath, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        return false;
+    }
+
+    $existingKeys = [];
+    $newLines = [];
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '#') || !str_contains($trimmed, '=')) {
+            $newLines[] = $line;
+            continue;
+        }
+
+        [$k, $v] = explode('=', $trimmed, 2);
+        $k = strtoupper(trim($k));
+
+        if (array_key_exists($k, $updates)) {
+            $val = (string)$updates[$k];
+            if (str_contains($val, ' ') || str_contains($val, '#') || $val === '') {
+                $val = '"' . addcslashes($val, '"') . '"';
+            }
+            $newLines[] = "{$k}={$val}";
+            $existingKeys[$k] = true;
+        } else {
+            $newLines[] = $line;
+        }
+    }
+
+    // Append any keys that didn't exist in .env yet
+    foreach ($updates as $k => $val) {
+        $k = strtoupper(trim($k));
+        if (!isset($existingKeys[$k])) {
+            $strVal = (string)$val;
+            if (str_contains($strVal, ' ') || str_contains($strVal, '#') || $strVal === '') {
+                $strVal = '"' . addcslashes($strVal, '"') . '"';
+            }
+            $newLines[] = "{$k}={$strVal}";
+        }
+    }
+
+    // Keep a backup before overwriting
+    copy($envPath, $backupPath);
+
+    return file_put_contents($envPath, implode("\n", $newLines) . "\n") !== false;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string)($_POST['action'] ?? 'save_settings');
@@ -66,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $invoiceSubj   = trim((string)($_POST['email_invoice_subject'] ?? 'Official Tax Invoice - Order #{order_number}'));
         $invoiceNote   = trim((string)($_POST['invoice_footer_note'] ?? 'Thank you for shopping with us!'));
 
-        // Store Guarantee / Trust Badges Customization (All 4 badges with icons)
+        // Store Guarantee / Trust Badges Customization
         $trustKeys = [
             'trust_badge_1_icon',
             'trust_badge_1_title',
@@ -92,20 +150,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/system/settings');
         }
 
-        // Save Branding & Logo Height
+        // 1. Save to database table `site_settings`
         site_setting_save('site_name', $name);
         site_setting_save('announcement', $announcement);
         site_setting_save('admin_notification_email', $adminEmail);
         site_setting_save('currency_symbol', $currency);
         site_setting_save('logo_height', (string)$logoHeight);
 
-        // Save SEO Settings
         site_setting_save('seo_meta_title', $seoTitle);
         site_setting_save('seo_meta_description', $seoDesc);
         site_setting_save('seo_meta_keywords', $seoKeys);
         site_setting_save('seo_og_image', $seoOgImg);
 
-        // Save SMTP Credentials 
         site_setting_save('mail_host', $mailHost);
         site_setting_save('mail_port', $mailPort);
         site_setting_save('mail_encryption', $mailEnc);
@@ -114,12 +170,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         site_setting_save('mail_from_address', $fromAddr);
         site_setting_save('mail_from_name', $fromName);
 
-        // Save Email Template Customizations
         site_setting_save('invoice_color', $emailColor);
         site_setting_save('email_order_placed_subject', $orderRecSubj);
         site_setting_save('email_order_placed_intro', $orderRecIntro);
         site_setting_save('email_invoice_subject', $invoiceSubj);
         site_setting_save('invoice_footer_note', $invoiceNote);
+
+        // 2. Synchronize directly into root .env file
+        $envSynced = sync_env_variables([
+            'MAIL_HOST'                => $mailHost,
+            'MAIL_PORT'                => $mailPort,
+            'MAIL_ENCRYPTION'          => $mailEnc,
+            'MAIL_USERNAME'            => $mailUser,
+            'MAIL_PASSWORD'            => $mailPass,
+            'MAIL_FROM_ADDRESS'        => $fromAddr,
+            'MAIL_FROM_NAME'           => $fromName,
+            'ADMIN_NOTIFICATION_EMAIL' => $adminEmail,
+        ]);
 
         $logoActivity = '';
 
@@ -151,14 +218,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // Audit Logging: Store Settings Saved
+        // Audit Logging
+        $envSyncNote = $envSynced ? ' and synchronized with root .env file' : ' (.env file not writeable)';
         log_admin_activity(
             'settings',
             'save_settings',
-            "Updated store branding (Store: '{$name}', Logo Height: {$logoHeight}px), trust badges, SEO, and mail settings{$logoActivity}"
+            "Updated store branding, SEO, and SMTP credentials{$envSyncNote}{$logoActivity}"
         );
 
-        flash('success', 'Store configuration, guarantees, and branding settings updated.');
+        if ($envSynced) {
+            flash('success', 'Store settings and SMTP credentials updated and synced with .env file successfully.');
+        } else {
+            flash('warning', 'Settings saved to database, but root .env file could not be updated. Please check file permissions.');
+        }
+
         redirect('admin/system/settings');
     }
 }
@@ -177,7 +250,7 @@ $seoDesc  = site_setting('seo_meta_description', 'Discover modern clothing, prem
 $seoKeys  = site_setting('seo_meta_keywords', 'clothing, fashion, online shop, bangladesh, modern fit, wardrobe');
 $seoOgImg = site_setting('seo_og_image', '');
 
-// SMTP Settings 
+// SMTP Settings: Fallback chain checks DB site_settings first, then envv(), then default
 $mailHost = site_setting('mail_host', envv('MAIL_HOST', 'smtp.gmail.com'));
 $mailPort = site_setting('mail_port', envv('MAIL_PORT', '587'));
 $mailEnc  = site_setting('mail_encryption', envv('MAIL_ENCRYPTION', 'tls'));
@@ -214,7 +287,7 @@ $invoiceNote   = site_setting('invoice_footer_note', 'Thank you for shopping wit
         <div class="field">
             <label>Admin Notification Email</label>
             <input type="email" name="admin_notification_email" value="<?= e($adminEmail) ?>">
-            <p class="small muted">Receives order alerts when a customer places an order.</p>
+            <p class="small muted">Receives order alerts when a customer places an order (Synced to <code>ADMIN_NOTIFICATION_EMAIL</code> in .env).</p>
         </div>
 
         <div class="field">
@@ -244,7 +317,7 @@ $invoiceNote   = site_setting('invoice_footer_note', 'Thank you for shopping wit
 
         <hr style="margin:25px 0; border:0; border-top:1px solid var(--line,#eee);">
 
-        <!-- Store Guarantees / Badges (Full 4 Badges with Icons, Titles & Subtitles) -->
+        <!-- Store Guarantees / Badges -->
         <h2>Homepage Store Guarantees / Badges</h2>
         <p class="muted small" style="margin-top:-5px; margin-bottom:20px;">Manage the icons, titles, and descriptions of all 4 trust badges displayed on your homepage.</p>
 
@@ -350,7 +423,8 @@ $invoiceNote   = site_setting('invoice_footer_note', 'Thank you for shopping wit
 
         <hr style="margin:25px 0; border:0; border-top:1px solid var(--line,#eee);">
 
-        <h2>SMTP & Mailer Credentials</h2>
+        <h2>SMTP & Mailer Credentials (Syncs to .env)</h2>
+        <p class="muted small" style="margin-top:-5px; margin-bottom:15px;">Saving here updates both your database settings and your root <code>.env</code> file automatically.</p>
         <div class="form-grid">
             <div class="field">
                 <label>SMTP Host</label>
