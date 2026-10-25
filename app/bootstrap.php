@@ -870,3 +870,50 @@ if (!str_contains($reqUri, '/manage_portal_x92/') && !str_contains($reqUri, '/ad
         // Silently ignore log errors
     }
 }
+/**
+ * Log administrative activity to admin_activity_logs
+ */
+if (!function_exists('log_admin_activity')) {
+    function log_admin_activity(string $module, string $action, string $description): void
+    {
+        try {
+            if (!function_exists('db')) {
+                return;
+            }
+
+            $adminId = $_SESSION['admin_id'] ?? null;
+            $adminName = $_SESSION['admin_name'] ?? null;
+            $adminEmail = $_SESSION['admin_email'] ?? null;
+
+            if (!$adminName && $adminId) {
+                $stmt = db()->prepare('SELECT name, email FROM admins WHERE id = ?');
+                $stmt->execute([$adminId]);
+                $u = $stmt->fetch();
+                if ($u) {
+                    $adminName = $u['name'];
+                    $adminEmail = $u['email'];
+                }
+            }
+
+            $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+            $ua = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+
+            $stmt = db()->prepare('
+                INSERT INTO admin_activity_logs (admin_id, admin_name, admin_email, module, action, description, ip_address, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([
+                $adminId,
+                $adminName ?: 'System',
+                $adminEmail ?: 'system@internal',
+                $module,
+                $action,
+                $description,
+                $ip,
+                $ua
+            ]);
+        } catch (Throwable $e) {
+            // Fail silently
+        }
+    }
+}
