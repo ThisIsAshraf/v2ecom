@@ -48,6 +48,11 @@ function admin_header(string $title): void
                 <a href="<?= e(url('admin/system/maintenance')) ?>" class="admin-nav-item">Maintenance Mode</a>
                 <a href="<?= e(url('admin/system/env')) ?>">ENV Configuration</a>
                 <a href="<?= e(url('admin/system/security')) ?>">Admin Security & Sessions</a>
+                <?php if (is_super_admin()): ?>
+                    <a href="<?= e(url('admin/system/activity-logs')) ?>" class="nav-item">
+                        📋 System Activity Logs
+                    </a>
+                <?php endif; ?>
 
                 <!-- Footer External Actions -->
                 <a href="<?= e(url('index.php')) ?>" target="_blank">View storefront ↗</a>
