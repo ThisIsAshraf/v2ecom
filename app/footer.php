@@ -140,18 +140,21 @@ $socials = [
 </footer>
 
 <?php
-// Load Dynamic Pop-up Offer Banner Settings ONLY on the homepage (index.php)
-$currentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
-$popEnabled  = site_setting('popup_enabled', '0');
+// Only display the popup if enabled AND visiting clean root homepage with no query parameters
+$currentPage     = basename($_SERVER['SCRIPT_NAME'] ?? '');
+$isCleanHomepage = ($currentPage === 'index.php' || $currentPage === '')
+    && empty($_GET['category'])
+    && empty($_GET['q']);
 
-if ($popEnabled === '1' && ($currentPage === 'index.php' || $currentPage === '')):
+$popEnabled = site_setting('popup_enabled', '0');
+
+if ($popEnabled === '1' && $isCleanHomepage):
     $popTitle   = site_setting('popup_title', 'Special Offer');
     $popMessage = site_setting('popup_message', 'Explore our current collection sale!');
     $popImg     = site_setting('popup_image_url', '');
     $popBtnText = site_setting('popup_button_text', 'Shop Offer');
     $popBtnUrl  = site_setting('popup_button_url', 'index.php#shop');
 
-    // Format Image Source
     $popImgSrc = '';
     if (!empty($popImg)) {
         if (str_starts_with($popImg, 'http://') || str_starts_with($popImg, 'https://')) {
@@ -292,9 +295,21 @@ if ($popEnabled === '1' && ($currentPage === 'index.php' || $currentPage === '')
     <!-- Pop-up Display Logic -->
     <script>
         function showOfferPopup() {
+            // Guard: don't show if user has search or category query parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('category') || urlParams.has('q')) {
+                return;
+            }
+
+            // Guard: only show once per browser session
+            if (sessionStorage.getItem('offer_popup_seen')) {
+                return;
+            }
+
             const modal = document.getElementById("offerPopupBackdrop");
             if (modal) {
                 modal.classList.add("active");
+                sessionStorage.setItem('offer_popup_seen', '1');
             }
         }
 
@@ -305,7 +320,6 @@ if ($popEnabled === '1' && ($currentPage === 'index.php' || $currentPage === '')
             }
         }
 
-        // Trigger pop-up display automatically on homepage load
         if (document.readyState === "loading") {
             document.addEventListener("DOMContentLoaded", function() {
                 setTimeout(showOfferPopup, 800);

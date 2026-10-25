@@ -421,19 +421,40 @@ require_once __DIR__ . '/app/header.php';
     <section class="hero-slider-container">
         <div class="hero-slides-wrapper">
             <?php foreach ($slides as $idx => $sl):
-                $bgImage = !empty($sl['image_url']) ? 'url(' . e(url($sl['image_url'])) . ')' : 'none';
+                $bgImage     = !empty($sl['image_url']) ? 'url(' . e(url($sl['image_url'])) . ')' : 'none';
+                $hasEyebrow  = !empty(trim((string)($sl['eyebrow'] ?? '')));
+                $hasSubtitle = !empty(trim((string)($sl['subtitle'] ?? '')));
+                $hasButton   = !empty(trim((string)($sl['button_text'] ?? '')));
+                $hasTitle    = !empty(trim((string)($sl['title'] ?? '')));
             ?>
                 <div class="hero-slide-item" style="background-image: <?= $bgImage ?>;">
-                    <div class="hero-glass-card">
-                        <?php if ($sl['eyebrow']): ?>
-                            <div style="text-transform:uppercase; letter-spacing:1.5px; font-weight:700; font-size:12px; color:var(--primary-color); margin-bottom:8px;"><?= e($sl['eyebrow']) ?></div>
-                        <?php endif; ?>
-                        <h1 style="font-size:36px; margin:0 0 12px 0; line-height:1.15; font-weight:700;"><?= e($sl['title']) ?></h1>
-                        <?php if ($sl['subtitle']): ?>
-                            <p style="font-size:15px; margin-bottom:22px; color:#444; line-height:1.5;"><?= e($sl['subtitle']) ?></p>
-                        <?php endif; ?>
-                        <a class="button" href="<?= e(url($sl['button_url'] ?: 'index.php')) ?>" style="padding:12px 26px; border-radius:6px; font-weight:600;"><?= e($sl['button_text'] ?: 'Explore Collection') ?> →</a>
-                    </div>
+                    <?php if ($hasTitle || $hasEyebrow || $hasSubtitle || $hasButton): ?>
+                        <div class="hero-glass-card">
+                            <?php if ($hasEyebrow): ?>
+                                <div style="text-transform:uppercase; letter-spacing:1.5px; font-weight:700; font-size:12px; color:var(--primary-color); margin-bottom:8px;">
+                                    <?= e($sl['eyebrow']) ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <?php if ($hasTitle): ?>
+                                <h1 style="font-size:36px; margin:0 0 12px 0; line-height:1.15; font-weight:700;">
+                                    <?= e($sl['title']) ?>
+                                </h1>
+                            <?php endif; ?>
+
+                            <?php if ($hasSubtitle): ?>
+                                <p style="font-size:15px; margin-bottom:22px; color:#444; line-height:1.5;">
+                                    <?= e($sl['subtitle']) ?>
+                                </p>
+                            <?php endif; ?>
+
+                            <?php if ($hasButton): ?>
+                                <a class="button" href="<?= e(url(!empty($sl['button_url']) ? $sl['button_url'] : 'index.php')) ?>" style="padding:12px 26px; border-radius:6px; font-weight:600;">
+                                    <?= e($sl['button_text']) ?> →
+                                </a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         </div>

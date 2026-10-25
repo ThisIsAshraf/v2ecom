@@ -1,6 +1,6 @@
 <?php require_once __DIR__ . '/app/bootstrap.php';
 
-// Helper to ensure item sizes are properly loaded from the session cart
+// Helper to ensure item sizes and stock details are properly loaded from the session cart
 function resolve_checkout_items(): array
 {
     $cart = $_SESSION['cart'] ?? [];
@@ -164,12 +164,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cityObj = $cityStmt->fetch();
         if (!$cityObj) $errors[] = 'Please select a valid delivery city.';
 
+        // Check Inventory (Both Aggregate and Per-Size Variant)
+        $variantCheck = db()->prepare('SELECT stock FROM product_variants WHERE product_id = ? AND size = ? LIMIT 1');
+
         foreach ($items as $i) {
             $s = db()->prepare('SELECT stock, active FROM products WHERE id=?');
             $s->execute([$i['id']]);
             $live = $s->fetch();
+
             if (!$live || !$live['active'] || (int)$live['stock'] < (int)$i['qty']) {
                 $errors[] = 'Stock changed for ' . $i['name'] . '. Please update your bag.';
+                continue;
+            }
+
+            // Check variant stock if item has a specific size
+            if (!empty($i['size'])) {
+                $variantCheck->execute([$i['id'], $i['size']]);
+                $vStock = $variantCheck->fetchColumn();
+                if ($vStock !== false && (int)$vStock < (int)$i['qty']) {
+                    $errors[] = 'Insufficient stock for ' . $i['name'] . ' in Size ' . $i['size'] . '. Only ' . (int)$vStock . ' available.';
+                }
             }
         }
 
@@ -238,18 +252,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $orderId = (int)$pdo->lastInsertId();
 
-                // 3. Line Items & Inventory Updates (Includes size persistence)
+                // 3. Line Items & Inventory Updates (Deducts both product_variants and products.stock)
                 $line = $pdo->prepare('
                     INSERT INTO order_items (order_id, product_id, size, product_name, sku, quantity, unit_price, line_total) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ');
                 $stockUpdate = $pdo->prepare('UPDATE products SET stock=stock-? WHERE id=? AND stock>=?');
+                $variantDeduct = $pdo->prepare('UPDATE product_variants SET stock=stock-? WHERE product_id=? AND size=? AND stock>=?');
 
                 foreach ($items as $i) {
+                    // Decrement size-specific variant stock if variant exists
+                    if (!empty($i['size'])) {
+                        $variantDeduct->execute([$i['qty'], $i['id'], $i['size'], $i['qty']]);
+                        // If variant existed but didn't have enough stock:
+                        if ($variantDeduct->rowCount() === 0) {
+                            // Check if the variant actually exists for this product
+                            $vExists = $pdo->prepare('SELECT COUNT(*) FROM product_variants WHERE product_id=? AND size=?');
+                            $vExists->execute([$i['id'], $i['size']]);
+                            if ((int)$vExists->fetchColumn() > 0) {
+                                throw new RuntimeException('Inventory for size ' . $i['size'] . ' changed during checkout.');
+                            }
+                        }
+                    }
+
+                    // Decrement overall aggregate product stock
                     $stockUpdate->execute([$i['qty'], $i['id'], $i['qty']]);
                     if ($stockUpdate->rowCount() !== 1) {
-                        throw new RuntimeException('Inventory changed during checkout.');
+                        throw new RuntimeException('Aggregate inventory changed during checkout.');
                     }
+
                     $line->execute([
                         $orderId,
                         $i['id'],
