@@ -5,11 +5,11 @@ require_permission('customers');
 $search = trim((string)($_GET['q'] ?? ''));
 
 // SQL Query Base
-$whereSql = "WHERE status NOT IN ('cancelled', 'returned')";
+$whereSql = "WHERE o.status NOT IN ('cancelled', 'returned')";
 $params = [];
 
 if ($search !== '') {
-    $whereSql .= " AND (customer_name LIKE ? OR customer_email LIKE ? OR customer_phone LIKE ? OR city LIKE ?)";
+    $whereSql .= " AND (o.customer_name LIKE ? OR o.customer_email LIKE ? OR o.customer_phone LIKE ? OR o.city LIKE ?)";
     $params = ["%$search%", "%$search%", "%$search%", "%$search%"];
 }
 
@@ -26,27 +26,31 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $out = fopen('php://output', 'w');
 
     // Header Row
-    fputcsv($out, ['Customer Name', 'Email Address', 'Phone Number', 'City / Location', 'Total Orders', 'Lifetime Spend', 'Last Active Date']);
+    fputcsv($out, ['Customer ID', 'Customer Name', 'Email Address', 'Phone Number', 'City / Location', 'Total Orders', 'Lifetime Spend', 'Last Active Date']);
 
     $exportSql = "
         SELECT 
-            customer_email,
-            MAX(customer_name) as customer_name,
-            customer_phone,
-            MAX(city) as city,
-            COUNT(id) as total_orders,
-            SUM(total) as lifetime_spend,
-            MAX(created_at) as last_order_date
-        FROM orders
+            MAX(u.id) as user_id,
+            o.customer_email,
+            MAX(o.customer_name) as customer_name,
+            o.customer_phone,
+            MAX(o.city) as city,
+            COUNT(o.id) as total_orders,
+            SUM(o.total) as lifetime_spend,
+            MAX(o.created_at) as last_order_date
+        FROM orders o
+        LEFT JOIN users u ON u.email COLLATE utf8mb4_unicode_ci = o.customer_email COLLATE utf8mb4_unicode_ci
         $whereSql
-        GROUP BY customer_email, customer_phone 
+        GROUP BY o.customer_email, o.customer_phone 
         ORDER BY lifetime_spend DESC
     ";
 
     $stmt = db()->prepare($exportSql);
     $stmt->execute($params);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $usrId = !empty($row['user_id']) ? ('USR-' . $row['user_id']) : 'Guest';
         fputcsv($out, [
+            $usrId,
             $row['customer_name'],
             $row['customer_email'],
             $row['customer_phone'],
@@ -65,7 +69,7 @@ $page  = max(1, (int)($_GET['page'] ?? 1));
 $limit = 10;
 
 // Count Total Unique Customers
-$countSql = "SELECT COUNT(DISTINCT customer_email, customer_phone) FROM orders $whereSql";
+$countSql = "SELECT COUNT(DISTINCT o.customer_email, o.customer_phone) FROM orders o $whereSql";
 $countStmt = db()->prepare($countSql);
 $countStmt->execute($params);
 $totalCustomers = (int)$countStmt->fetchColumn();
@@ -77,23 +81,25 @@ $offset = ($page - 1) * $limit;
 // Fetch Paginated Customers
 $sql = "
     SELECT 
-        customer_email,
-        MAX(customer_name) as customer_name,
-        customer_phone,
-        MAX(city) as city,
-        COUNT(id) as total_orders,
-        SUM(total) as lifetime_spend,
-        MAX(created_at) as last_order_date
-    FROM orders
+        MAX(u.id) as user_id,
+        o.customer_email,
+        MAX(o.customer_name) as customer_name,
+        o.customer_phone,
+        MAX(o.city) as city,
+        COUNT(o.id) as total_orders,
+        SUM(o.total) as lifetime_spend,
+        MAX(o.created_at) as last_order_date
+    FROM orders o
+    LEFT JOIN users u ON u.email COLLATE utf8mb4_unicode_ci = o.customer_email COLLATE utf8mb4_unicode_ci
     $whereSql
-    GROUP BY customer_email, customer_phone 
+    GROUP BY o.customer_email, o.customer_phone 
     ORDER BY lifetime_spend DESC 
     LIMIT $limit OFFSET $offset
 ";
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
-$customers = $stmt->fetchAll();
+$customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Customer Order History Inspection View
 $inspectCustomer = null;
@@ -102,7 +108,7 @@ if (isset($_GET['inspect_email'])) {
     $inspectEmail = trim((string)$_GET['inspect_email']);
     $s = db()->prepare('SELECT * FROM orders WHERE customer_email = ? ORDER BY id DESC');
     $s->execute([$inspectEmail]);
-    $customerOrders = $s->fetchAll();
+    $customerOrders = $s->fetchAll(PDO::FETCH_ASSOC);
     if ($customerOrders) {
         $inspectCustomer = $customerOrders[0];
 
@@ -186,6 +192,7 @@ admin_header('Customer Directory & Intelligence'); ?>
         <table>
             <thead>
                 <tr>
+                    <th>Customer ID</th>
                     <th>Customer Name & Email</th>
                     <th>Phone Number</th>
                     <th>City / Location</th>
@@ -198,6 +205,17 @@ admin_header('Customer Directory & Intelligence'); ?>
             <tbody>
                 <?php foreach ($customers as $c): ?>
                     <tr>
+                        <td>
+                            <?php if (!empty($c['user_id'])): ?>
+                                <span class="status" style="padding:2px 6px; font-weight:bold; font-size:11px; background:#e0e7ff; color:#3730a3;">
+                                    #USR-<?= (int)$c['user_id'] ?>
+                                </span>
+                            <?php else: ?>
+                                <span class="muted small" style="background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:11px;">
+                                    Guest
+                                </span>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <b><?= e($c['customer_name']) ?></b><br>
                             <span class="muted small"><?= e($c['customer_email']) ?></span>
@@ -219,7 +237,7 @@ admin_header('Customer Directory & Intelligence'); ?>
                 <?php endforeach; ?>
                 <?php if (!$customers): ?>
                     <tr>
-                        <td colspan="7" style="text-align:center; padding:20px;">No customer records found.</td>
+                        <td colspan="8" style="text-align:center; padding:20px;" class="muted">No customer records found.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
