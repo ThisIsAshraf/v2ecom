@@ -1,7 +1,7 @@
 <?php require_once __DIR__ . '/../_init.php';
 
 admin_required();
-require_permission('analytics'); // Ensure admin permissions check
+require_permission('analytics');
 
 $title = 'Real-Time Traffic & Order Analytics';
 
@@ -14,10 +14,10 @@ $todayStats = db()->query("
         (SELECT COALESCE(SUM(total), 0) FROM orders WHERE DATE(created_at) = CURDATE()) AS total_revenue
 ")->fetch(PDO::FETCH_ASSOC);
 
-$viewsToday   = (int)$todayStats['total_views'];
-$uniquesToday = (int)$todayStats['unique_visitors'];
-$ordersToday  = (int)$todayStats['total_orders'];
-$revenueToday = (float)$todayStats['total_revenue'];
+$viewsToday   = (int)($todayStats['total_views'] ?? 0);
+$uniquesToday = (int)($todayStats['unique_visitors'] ?? 0);
+$ordersToday  = (int)($todayStats['total_orders'] ?? 0);
+$revenueToday = (float)($todayStats['total_revenue'] ?? 0.0);
 
 // 2. Handle Manual "Send Email Snapshot" Button Click
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'send_snapshot_email') {
@@ -81,13 +81,13 @@ if ($viewsToday >= 500 || $uniquesToday >= 100 || $ordersToday >= 15) {
     $advisoryMessage = '<b>Action Recommended:</b> Your traffic/order volume is approaching free hosting thresholds. Consider upgrading to standard shared hosting or a VPS to prevent site downtime or CPU throttling.';
 }
 
-// 4. Fetch Hourly Breakdown
+// 4. Fetch Hourly Breakdown (Isolated Subqueries prevent Cartesian Duplication)
 $hourlyDataStmt = db()->query("
     SELECT 
         HOURS.hr AS hour,
-        COUNT(v.id) AS visits,
-        COUNT(DISTINCT v.ip_address) AS unique_visits,
-        COUNT(DISTINCT o.id) AS orders
+        COALESCE(v.visits, 0) AS visits,
+        COALESCE(v.unique_visits, 0) AS unique_visits,
+        COALESCE(o.orders, 0) AS orders
     FROM (
         SELECT 0 AS hr UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 
         UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 
@@ -95,19 +95,31 @@ $hourlyDataStmt = db()->query("
         UNION SELECT 15 UNION SELECT 16 UNION SELECT 17 UNION SELECT 18 UNION SELECT 19 
         UNION SELECT 20 UNION SELECT 21 UNION SELECT 22 UNION SELECT 23
     ) AS HOURS
-    LEFT JOIN visitor_logs v 
-        ON HOUR(v.created_at) = HOURS.hr AND DATE(v.created_at) = CURDATE()
-    LEFT JOIN orders o 
-        ON HOUR(o.created_at) = HOURS.hr AND DATE(o.created_at) = CURDATE()
-    GROUP BY HOURS.hr
+    LEFT JOIN (
+        SELECT 
+            HOUR(created_at) AS hr, 
+            COUNT(*) AS visits, 
+            COUNT(DISTINCT ip_address) AS unique_visits
+        FROM visitor_logs 
+        WHERE DATE(created_at) = CURDATE()
+        GROUP BY HOUR(created_at)
+    ) v ON v.hr = HOURS.hr
+    LEFT JOIN (
+        SELECT 
+            HOUR(created_at) AS hr, 
+            COUNT(*) AS orders
+        FROM orders 
+        WHERE DATE(created_at) = CURDATE()
+        GROUP BY HOUR(created_at)
+    ) o ON o.hr = HOURS.hr
     ORDER BY HOURS.hr ASC
 ");
 $hourlyData = $hourlyDataStmt->fetchAll(PDO::FETCH_ASSOC);
 
-$labels = [];
-$visits = [];
+$labels  = [];
+$visits  = [];
 $uniques = [];
-$orders = [];
+$orders  = [];
 
 foreach ($hourlyData as $row) {
     $labels[]  = sprintf("%02d:00", $row['hour']);
@@ -116,7 +128,6 @@ foreach ($hourlyData as $row) {
     $orders[]  = (int)$row['orders'];
 }
 
-// Load Admin Sidebar & Layout Header
 admin_header($title);
 ?>
 
@@ -194,7 +205,6 @@ admin_header($title);
 </style>
 
 <div class="panel" style="margin-bottom: 25px;">
-    <!-- Analytics Header & Action Buttons -->
     <div class="analytics-header">
         <h2 style="margin: 0;">Real-Time Visitor & Order Tracking</h2>
         <div class="btn-group">
@@ -209,32 +219,29 @@ admin_header($title);
         </div>
     </div>
 
-    <!-- Server Capacity Advisory Banner -->
     <div class="alert-banner <?= $hostingStatus === 'WARNING' ? 'alert-warning' : 'alert-normal' ?>">
         <?= $advisoryMessage ?>
     </div>
 
-    <!-- KPI Cards Grid -->
     <div class="grid-kpi">
         <div class="kpi-card">
             <h3>Total Page Views Today</h3>
-            <div class="value"><?= number_format((float)$todayStats['total_views']) ?></div>
+            <div class="value"><?= number_format($viewsToday) ?></div>
         </div>
         <div class="kpi-card">
             <h3>Unique Visitors Today</h3>
-            <div class="value"><?= number_format((float)$todayStats['unique_visitors']) ?></div>
+            <div class="value"><?= number_format($uniquesToday) ?></div>
         </div>
         <div class="kpi-card">
             <h3>Orders Placed Today</h3>
-            <div class="value"><?= number_format((float)$todayStats['total_orders']) ?></div>
+            <div class="value"><?= number_format($ordersToday) ?></div>
         </div>
         <div class="kpi-card">
             <h3>Today's Revenue</h3>
-            <div class="value"><?= money($todayStats['total_revenue']) ?></div>
+            <div class="value"><?= money($revenueToday) ?></div>
         </div>
     </div>
 
-    <!-- Hourly Graph Chart -->
     <div class="chart-box">
         <h3 style="margin-top: 0; margin-bottom: 16px;">Hourly Activity Breakdown (24 Hours)</h3>
         <canvas id="hourlyChart" height="90"></canvas>

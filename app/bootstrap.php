@@ -947,18 +947,38 @@ if (site_setting('maintenance_mode', '0') === '1') {
     }
 }
 
-// Automatic Traffic Logger (Ignores admin portal requests)
-$reqUri = $_SERVER['REQUEST_URI'] ?? '';
-if (!str_contains($reqUri, '/manage_portal_x92/') && !str_contains($reqUri, '/admin/')) {
-    try {
-        $ip  = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-        $url = substr($reqUri, 0, 255);
-        $ua  = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
+/**
+ * Site Analytics
+ */
 
-        $stmt = db()->prepare("INSERT INTO visitor_logs (ip_address, page_url, user_agent) VALUES (?, ?, ?)");
-        $stmt->execute([$ip, $url, $ua]);
-    } catch (Throwable $e) {
-        // Silently ignore log errors
+// Automatic Traffic Logger (Ignores admin portal, static assets, and sub-second duplicate hits)
+$reqUri    = $_SERVER['REQUEST_URI'] ?? '';
+$reqMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+$isAdminRoute  = str_contains($reqUri, '/manage_portal_x92/') || str_contains($reqUri, '/admin/');
+$cleanPath     = parse_url($reqUri, PHP_URL_PATH) ?? '';
+$isStaticAsset = preg_match('/\.(ico|png|jpg|jpeg|gif|webp|svg|css|js|map|woff|woff2|ttf)$/i', $cleanPath) === 1;
+
+if (!$isAdminRoute && !$isStaticAsset && $reqMethod === 'GET') {
+    $now = microtime(true);
+    $lastHitTime = (float)($_SESSION['_last_log_time'] ?? 0);
+    $lastHitUrl  = (string)($_SESSION['_last_log_url'] ?? '');
+
+    // Ignore duplicate hit to the exact same URL if it happened within 1.5 seconds (browser double-fetch)
+    if ($cleanPath !== $lastHitUrl || ($now - $lastHitTime) > 1.5) {
+        $_SESSION['_last_log_time'] = $now;
+        $_SESSION['_last_log_url']  = $cleanPath;
+
+        try {
+            $ip  = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+            $url = substr($cleanPath, 0, 255);
+            $ua  = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
+
+            $stmt = db()->prepare("INSERT INTO visitor_logs (ip_address, page_url, user_agent) VALUES (?, ?, ?)");
+            $stmt->execute([$ip, $url, $ua]);
+        } catch (Throwable $e) {
+            // Silently ignore log errors
+        }
     }
 }
 
