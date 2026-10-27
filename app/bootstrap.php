@@ -951,7 +951,7 @@ if (site_setting('maintenance_mode', '0') === '1') {
  * Site Analytics
  */
 
-// Automatic Traffic Logger (Ignores admin portal, static assets, and sub-second duplicate hits)
+// --- AUTOMATIC ENTERPRISE TRAFFIC & DEVICE LOGGER ---
 $reqUri    = $_SERVER['REQUEST_URI'] ?? '';
 $reqMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -961,21 +961,49 @@ $isStaticAsset = preg_match('/\.(ico|png|jpg|jpeg|gif|webp|svg|css|js|map|woff|w
 
 if (!$isAdminRoute && !$isStaticAsset && $reqMethod === 'GET') {
     $now = microtime(true);
-    $lastHitTime = (float)($_SESSION['_last_log_time'] ?? 0);
-    $lastHitUrl  = (string)($_SESSION['_last_log_url'] ?? '');
+    $lastHitTime = (float)($_SESSION['_last_traffic_time'] ?? 0);
+    $lastHitUrl  = (string)($_SESSION['_last_traffic_url'] ?? '');
 
-    // Ignore duplicate hit to the exact same URL if it happened within 1.5 seconds (browser double-fetch)
-    if ($cleanPath !== $lastHitUrl || ($now - $lastHitTime) > 1.5) {
-        $_SESSION['_last_log_time'] = $now;
-        $_SESSION['_last_log_url']  = $cleanPath;
+    if ($cleanPath !== $lastHitUrl || ($now - $lastHitTime) > 2.0) {
+        $_SESSION['_last_traffic_time'] = $now;
+        $_SESSION['_last_traffic_url']  = $cleanPath;
 
         try {
-            $ip  = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-            $url = substr($cleanPath, 0, 255);
-            $ua  = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
+            $ip       = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+            $url      = substr($cleanPath, 0, 255);
+            $ua       = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
+            $referrer = substr($_SERVER['HTTP_REFERER'] ?? '', 0, 500);
 
-            $stmt = db()->prepare("INSERT INTO visitor_logs (ip_address, page_url, user_agent) VALUES (?, ?, ?)");
-            $stmt->execute([$ip, $url, $ua]);
+            // Parse Device Type
+            $device = 'Desktop';
+            if (preg_match('/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i', $ua)) {
+                $device = 'Tablet';
+            } elseif (preg_match('/(Mobile|iPod|iPhone|Android|BlackBerry|IEMobile)/i', $ua)) {
+                $device = 'Mobile';
+            }
+
+            // Parse OS
+            $os = 'Unknown OS';
+            if (preg_match('/windows nt 10/i', $ua)) $os = 'Windows 10/11';
+            elseif (preg_match('/windows nt/i', $ua)) $os = 'Windows';
+            elseif (preg_match('/macintosh|mac os x/i', $ua)) $os = 'macOS';
+            elseif (preg_match('/iphone|ipad/i', $ua)) $os = 'iOS';
+            elseif (preg_match('/android/i', $ua)) $os = 'Android';
+            elseif (preg_match('/linux/i', $ua)) $os = 'Linux';
+
+            // Parse Browser
+            $browser = 'Unknown Browser';
+            if (preg_match('/edg/i', $ua)) $browser = 'Edge';
+            elseif (preg_match('/chrome/i', $ua)) $browser = 'Chrome';
+            elseif (preg_match('/firefox/i', $ua)) $browser = 'Firefox';
+            elseif (preg_match('/safari/i', $ua)) $browser = 'Safari';
+            elseif (preg_match('/opera|opr/i', $ua)) $browser = 'Opera';
+
+            $stmt = db()->prepare("
+                INSERT INTO visitor_logs (ip_address, page_url, user_agent, referrer_url, device_type, browser, os) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$ip, $url, $ua, $referrer ?: null, $device, $browser, $os]);
         } catch (Throwable $e) {
             // Silently ignore log errors
         }

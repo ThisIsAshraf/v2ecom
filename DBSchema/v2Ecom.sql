@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Oct 25, 2026 at 11:36 PM
+-- Generation Time: Oct 27, 2026 at 03:21 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -66,6 +66,18 @@ CREATE TABLE `admin_activity_logs` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Dumping data for table `admin_activity_logs`
+--
+
+INSERT INTO `admin_activity_logs` (`id`, `admin_id`, `admin_name`, `admin_email`, `module`, `action`, `description`, `ip_address`, `user_agent`, `created_at`) VALUES
+(1, 1, 'DiverseAdmin', 'alam.office.my@gmail.com', 'categories', 'auto_create', 'Auto-created category \'Men Casual\' during bulk CSV import', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-26 10:53:04'),
+(2, 1, 'DiverseAdmin', 'alam.office.my@gmail.com', 'categories', 'auto_create', 'Auto-created category \'Women Ethnic\' during bulk CSV import', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-26 10:53:04'),
+(3, 1, 'DiverseAdmin', 'alam.office.my@gmail.com', 'products', 'import_csv', 'Bulk CSV Import: 2 new products inserted, 0 updated, 0 skipped', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-26 10:53:04'),
+(4, 1, 'DiverseAdmin', 'alam.office.my@gmail.com', 'settings', 'save_settings', 'Updated store branding, SEO, and SMTP credentials and synchronized with root .env file [New logo uploaded]', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-26 18:31:04'),
+(5, 1, 'DiverseAdmin', 'alam.office.my@gmail.com', 'settings', 'save_settings', 'Updated store branding, SEO, and SMTP credentials and synchronized with root .env file', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-26 18:35:45'),
+(6, 1, 'DiverseAdmin', 'alam.office.my@gmail.com', 'settings', 'test_email', 'Sent test verification email to alamshihab526@gmail.com (Delivered successfully)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', '2026-10-27 13:57:57');
+
 -- --------------------------------------------------------
 
 --
@@ -88,7 +100,12 @@ CREATE TABLE `admin_login_logs` (
 
 INSERT INTO `admin_login_logs` (`id`, `admin_id`, `email_attempted`, `ip_address`, `user_agent`, `status`, `created_at`) VALUES
 (1, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'failed', '2026-10-25 22:32:12'),
-(2, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-25 22:32:19');
+(2, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-25 22:32:19'),
+(3, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'failed', '2026-10-26 05:53:36'),
+(4, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-26 05:53:43'),
+(5, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-26 10:51:40'),
+(6, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-26 18:29:20'),
+(7, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'success', '2026-10-27 13:49:25');
 
 -- --------------------------------------------------------
 
@@ -109,7 +126,7 @@ CREATE TABLE `admin_sessions` (
 --
 
 INSERT INTO `admin_sessions` (`id`, `admin_id`, `ip_address`, `user_agent`, `last_activity`) VALUES
-('bhekgdlhav8nermr2r8vtriskb', 1, '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-25 22:32:42');
+('6vqml7huqu27dikiprcs58med2', 1, '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', '2026-10-27 14:09:50');
 
 -- --------------------------------------------------------
 
@@ -142,6 +159,14 @@ CREATE TABLE `categories` (
   `slug` varchar(120) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `categories`
+--
+
+INSERT INTO `categories` (`id`, `name`, `slug`, `created_at`) VALUES
+(1, 'Men Casual', 'men-casual', '2026-10-26 10:53:04'),
+(2, 'Women Ethnic', 'women-ethnic', '2026-10-26 10:53:04');
 
 -- --------------------------------------------------------
 
@@ -320,6 +345,14 @@ CREATE TABLE `products` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+--
+-- Dumping data for table `products`
+--
+
+INSERT INTO `products` (`id`, `category_id`, `name`, `slug`, `sku`, `description`, `price`, `sizes`, `colors`, `compare_price`, `image_url`, `stock`, `active`, `created_at`, `updated_at`) VALUES
+(1, 1, 'Cotton Oxford Shirt', 'cotton-oxford-shirt', 'SHIRT-OX-001', 'Premium breathable cotton shirt.', 1450.00, 'S,M,L,XL', 'White,Blue,Black', 1850.00, 'https://example.com/shirt.jpg', 25, 1, '2026-10-26 10:53:04', '2026-10-26 10:53:04'),
+(2, 2, 'Floral Printed Kurti', 'floral-printed-kurti', 'KURTI-FL-002', 'Lightweight 3-piece set with dupatta.', 2200.00, 'M,L,XL', 'Red,Green', 2600.00, '', 15, 1, '2026-10-26 10:53:04', '2026-10-26 10:53:04');
+
 -- --------------------------------------------------------
 
 --
@@ -437,9 +470,9 @@ INSERT INTO `site_settings` (`setting_key`, `setting_value`, `updated_at`) VALUE
 ('hero_eyebrow', 'Made for your everyday', '2026-10-18 10:22:06'),
 ('hero_title', 'Wear what feels like you.', '2026-10-18 10:22:06'),
 ('invoice_color', '#a94f28', '2026-10-20 14:11:51'),
-('invoice_footer_note', 'Thank you for shopping with us!555633', '2026-10-19 19:38:52'),
+('invoice_footer_note', 'Thank you for shopping with us', '2026-10-26 18:35:45'),
 ('logo_height', '150', '2026-10-25 18:45:24'),
-('logo_url', 'uploads/logo-e18a928bbfd4e73752aabe95.png', '2026-10-25 11:00:51'),
+('logo_url', 'uploads/logo-da26d865e89750d5d646c847.png', '2026-10-26 18:31:04'),
 ('mail_encryption', 'tls', '2026-10-18 17:14:14'),
 ('mail_from_address', 'alam.office.my@gmail.com', '2026-10-25 19:27:15'),
 ('mail_from_name', '\"DiverseBD Store\"', '2026-10-23 07:04:25'),
@@ -571,6 +604,10 @@ CREATE TABLE `visitor_logs` (
   `ip_address` varchar(45) NOT NULL,
   `page_url` varchar(255) NOT NULL,
   `user_agent` text DEFAULT NULL,
+  `referrer_url` varchar(500) DEFAULT NULL,
+  `device_type` varchar(20) DEFAULT 'Desktop',
+  `browser` varchar(50) DEFAULT NULL,
+  `os` varchar(50) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -578,9 +615,8 @@ CREATE TABLE `visitor_logs` (
 -- Dumping data for table `visitor_logs`
 --
 
-INSERT INTO `visitor_logs` (`id`, `ip_address`, `page_url`, `user_agent`, `created_at`) VALUES
-(1, '::1', '/v2ecom/admin', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-25 22:32:19'),
-(2, '::1', '/v2ecom/admin', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', '2026-10-25 22:32:19');
+INSERT INTO `visitor_logs` (`id`, `ip_address`, `page_url`, `user_agent`, `referrer_url`, `device_type`, `browser`, `os`, `created_at`) VALUES
+(1, '::1', '/v2ecom/index.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/index.php', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-27 14:09:29');
 
 --
 -- Indexes for dumped tables
@@ -767,7 +803,9 @@ ALTER TABLE `users`
 ALTER TABLE `visitor_logs`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_created_at` (`created_at`),
-  ADD KEY `idx_ip_time` (`ip_address`,`created_at`);
+  ADD KEY `idx_ip_time` (`ip_address`,`created_at`),
+  ADD KEY `idx_ip_created` (`ip_address`,`created_at`),
+  ADD KEY `idx_device` (`device_type`);
 
 --
 -- AUTO_INCREMENT for dumped tables
@@ -783,13 +821,13 @@ ALTER TABLE `admins`
 -- AUTO_INCREMENT for table `admin_activity_logs`
 --
 ALTER TABLE `admin_activity_logs`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `admin_login_logs`
 --
 ALTER TABLE `admin_login_logs`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
 
 --
 -- AUTO_INCREMENT for table `api_keys`
@@ -801,7 +839,7 @@ ALTER TABLE `api_keys`
 -- AUTO_INCREMENT for table `categories`
 --
 ALTER TABLE `categories`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `contacts`
@@ -855,7 +893,7 @@ ALTER TABLE `order_status_history`
 -- AUTO_INCREMENT for table `products`
 --
 ALTER TABLE `products`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `product_images`
@@ -903,7 +941,7 @@ ALTER TABLE `users`
 -- AUTO_INCREMENT for table `visitor_logs`
 --
 ALTER TABLE `visitor_logs`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- Constraints for dumped tables
