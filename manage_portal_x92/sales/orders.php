@@ -494,7 +494,9 @@ $logoUrl = site_setting('logo_url', '');
                     <a href="<?= e(url('admin/sales/orders')) ?>" class="button secondary" style="padding:6px 10px; font-size:13px;">Reset</a>
                 <?php endif; ?>
             </form>
-            <a href="<?= e(url('admin/sales/orders?export=csv' . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:6px 12px; font-size:13px;">📥 Export CSV</a>
+            <a href="<?= e(url('admin/sales/orders?export=csv' . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:6px 12px; font-size:13px;">📥 Export CSV</a><a href="<?= e(url('admin/sales/create_order')) ?>" class="button" style="padding:6px 12px; font-size:13px; background:#16a34a; border-color:#15803d;">
+                ➕ Create Phone Order
+            </a>
         </div>
     </div>
 
