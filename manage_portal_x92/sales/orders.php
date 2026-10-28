@@ -22,7 +22,7 @@ if ($search !== '') {
 
 $whereSql = $whereClauses ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
 
-// --- CSV EXPORT HANDLER ---
+// --- CSV EXPORT HANDLER (Includes Profit & COGS) ---
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $filename = 'orders-export-' . date('Y-m-d-His') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
@@ -36,16 +36,25 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     log_admin_activity('orders', 'export_csv', 'Exported orders ledger to CSV' . $filterText);
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Order Number', 'Date', 'Customer Name', 'Email', 'Phone', 'City', 'Subtotal', 'Discount', 'Shipping', 'Total', 'Status', 'Items']);
+    fputcsv($out, ['Order Number', 'Date', 'Customer Name', 'Email', 'Phone', 'City', 'Subtotal', 'Discount', 'Shipping', 'Total Revenue', 'Order COGS', 'Est. Profit', 'Status', 'Items']);
 
-    $exportSql = "SELECT * FROM orders $whereSql ORDER BY id DESC";
+    $exportSql = "
+        SELECT o.*, COALESCE(cogs.order_cogs, 0) AS order_cogs 
+        FROM orders o
+        LEFT JOIN (
+            SELECT order_id, SUM(quantity * cost_price) AS order_cogs
+            FROM order_items
+            GROUP BY order_id
+        ) cogs ON cogs.order_id = o.id
+        $whereSql 
+        ORDER BY o.id DESC
+    ";
     $stmt = db()->prepare($exportSql);
     $stmt->execute($params);
 
     $itemsStmt = db()->prepare('SELECT product_name, color, size, quantity FROM order_items WHERE order_id = ?');
 
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        // Fetch items with Color & Size for CSV export
         $itemsStmt->execute([$row['id']]);
         $orderLines = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
         $itemSummaries = [];
@@ -57,6 +66,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $itemSummaries[] = "{$ol['product_name']}{$vStr} x{$ol['quantity']}";
         }
 
+        $revVal = (float)$row['total'];
+        $cogsVal = (float)$row['order_cogs'];
+        $profitVal = $revVal - $cogsVal;
+
         fputcsv($out, [
             $row['order_number'],
             $row['created_at'],
@@ -64,10 +77,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['customer_email'],
             $row['customer_phone'],
             $row['city'],
-            $row['subtotal'],
-            $row['discount_amount'],
-            $row['shipping_amount'],
-            $row['total'],
+            number_format((float)$row['subtotal'], 2),
+            number_format((float)$row['discount_amount'], 2),
+            number_format((float)$row['shipping_amount'], 2),
+            number_format($revVal, 2),
+            number_format($cogsVal, 2),
+            number_format($profitVal, 2),
             ucfirst($row['status']),
             implode('; ', $itemSummaries)
         ]);
@@ -123,7 +138,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $linesStmt->execute([$id]);
                 $orderItems = $linesStmt->fetchAll();
 
-                // Append Color & Size to display name for email invoices
                 foreach ($orderItems as &$oi) {
                     $details = [];
                     if (!empty($oi['color']) && !str_contains($oi['product_name'], 'Color:')) {
@@ -153,10 +167,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('admin/sales/orders' . ($id ? '?id=' . $id : ''));
 }
 
-// Inspection Details Query
+// Inspection Details Query with Profit Calculation
 $detail = null;
 $lines = [];
 $history = [];
+$orderCogs = 0.0;
+$orderProfit = 0.0;
+$orderMargin = 0.0;
 
 if (isset($_GET['id'])) {
     $s = db()->prepare('SELECT * FROM orders WHERE id=?');
@@ -165,10 +182,19 @@ if (isset($_GET['id'])) {
     if ($detail) {
         $s = db()->prepare('SELECT * FROM order_items WHERE order_id=?');
         $s->execute([$detail['id']]);
-        $lines = $s->fetchAll();
+        $lines = $s->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($lines as $l) {
+            $orderCogs += ((float)$l['cost_price'] * (int)$l['quantity']);
+        }
+        $orderProfit = (float)$detail['total'] - $orderCogs;
+        if ((float)$detail['total'] > 0) {
+            $orderMargin = round(($orderProfit / (float)$detail['total']) * 100, 1);
+        }
+
         $s = db()->prepare('SELECT * FROM order_status_history WHERE order_id=? ORDER BY id DESC');
         $s->execute([$detail['id']]);
-        $history = $s->fetchAll();
+        $history = $s->fetchAll(PDO::FETCH_ASSOC);
     }
 }
 
@@ -278,7 +304,7 @@ $logoUrl = site_setting('logo_url', '');
 
     .invoice-summary-box {
         margin-left: auto;
-        width: 280px;
+        width: 300px;
         background: #fafafa;
         border: 1px solid #eee;
         padding: 16px;
@@ -332,7 +358,7 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Line Items Table (Includes Color and Size Options) -->
+        <!-- Line Items Table -->
         <table class="invoice-table">
             <thead>
                 <tr>
@@ -378,13 +404,22 @@ $logoUrl = site_setting('logo_url', '');
             </tbody>
         </table>
 
-        <!-- Summary Calculation & Payment Note -->
+        <!-- Summary Calculation & Internal Profit Breakdown -->
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:20px;">
             <div style="max-width:320px;">
                 <b style="color:#666; font-size:12px; text-transform:uppercase;">Payment Info:</b>
                 <p style="margin:4px 0 10px 0; font-weight:bold; color:<?= e($invoiceColor) ?>;">Cash on Delivery (COD)</p>
+
+                <!-- Internal Admin Profit Margin Card (No Print) -->
+                <div class="no-print" style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:6px; margin-top:10px;">
+                    <b style="color:#166534; font-size:12px; text-transform:uppercase; display:block; margin-bottom:4px;">Order Profitability Analysis</b>
+                    <div style="font-size:13px; display:flex; justify-content:space-between;"><span>Order COGS:</span> <b><?= money($orderCogs) ?></b></div>
+                    <div style="font-size:13px; display:flex; justify-content:space-between; margin-top:2px;"><span>Net Profit:</span> <b style="color:#16a34a;"><?= money($orderProfit) ?></b></div>
+                    <div style="font-size:13px; display:flex; justify-content:space-between; margin-top:2px;"><span>Profit Margin:</span> <b style="color:#2563eb;"><?= $orderMargin ?>%</b></div>
+                </div>
+
                 <?php if (!empty($detail['notes'])): ?>
-                    <b style="color:#666; font-size:12px; text-transform:uppercase;">Customer Note:</b>
+                    <b style="color:#666; font-size:12px; text-transform:uppercase; display:block; margin-top:10px;">Customer Note:</b>
                     <p style="margin:4px 0 0 0; font-size:13px; color:#555; background:#f9f9f9; padding:8px; border-radius:4px; border:1px dashed #ddd;"><?= e($detail['notes']) ?></p>
                 <?php endif; ?>
             </div>

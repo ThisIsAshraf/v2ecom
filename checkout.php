@@ -52,7 +52,7 @@ function resolve_checkout_items(): array
     $productIds = array_unique($productIds);
     $inMarks = implode(',', array_fill(0, count($productIds), '?'));
 
-    // Fetch products
+    // Fetch products (Including cost_price for profit tracking)
     $stmt = db()->prepare("SELECT * FROM products WHERE id IN ($inMarks)");
     $stmt->execute(array_values($productIds));
     $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -80,11 +80,12 @@ function resolve_checkout_items(): array
             continue;
         }
 
-        $p     = $prodMap[$pId];
-        $price = (float)$p['price'];
-        $qty   = $r['qty'];
-        $sku   = $p['sku'] ?? null;
-        $stock = (int)$p['stock'];
+        $p         = $prodMap[$pId];
+        $price     = (float)$p['price'];
+        $costPrice = (float)($p['cost_price'] ?? 0.00);
+        $qty       = $r['qty'];
+        $sku       = $p['sku'] ?? null;
+        $stock     = (int)$p['stock'];
 
         $vk = $pId . '|' . $r['color'] . '|' . $r['size'];
         if (isset($vMatrix[$vk])) {
@@ -105,6 +106,7 @@ function resolve_checkout_items(): array
             'slug'       => $p['slug'],
             'sku'        => $sku,
             'price'      => $price,
+            'cost_price' => $costPrice,
             'qty'        => $qty,
             'stock'      => $stock,
             'active'     => (int)$p['active'],
@@ -201,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cityObj = $cityStmt->fetch();
         if (!$cityObj) $errors[] = 'Please select a valid delivery city.';
 
-        // Check Inventory (Both Aggregate and Per Color/Size Variant)
+        // Check Inventory
         $variantCheck = db()->prepare('
             SELECT stock FROM product_variants 
             WHERE product_id = ? 
@@ -220,7 +222,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
 
-            // Check variant stock if item has color or size
             if (!empty($i['color']) || !empty($i['size'])) {
                 $variantCheck->execute([$i['id'], $i['color'], $i['color'], $i['size'], $i['size']]);
                 $vStock = $variantCheck->fetchColumn();
@@ -296,10 +297,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $orderId = (int)$pdo->lastInsertId();
 
-                // 3. Line Items & Multi-Variant Inventory Deductions
+                // 3. Line Items & Multi-Variant Inventory Deductions (SAVES COST_PRICE SNAPSHOT)
                 $line = $pdo->prepare('
-                    INSERT INTO order_items (order_id, product_id, color, size, product_name, sku, quantity, unit_price, line_total) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO order_items (order_id, product_id, color, size, product_name, sku, quantity, unit_price, cost_price, line_total) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ');
                 $stockUpdate = $pdo->prepare('UPDATE products SET stock=stock-? WHERE id=? AND stock>=?');
                 $variantDeduct = $pdo->prepare('
@@ -315,7 +316,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $itemColor = $i['color'] !== '' ? $i['color'] : null;
                     $itemSize  = $i['size'] !== '' ? $i['size'] : null;
 
-                    // Decrement color/size variant stock if configured
                     if (!empty($i['color']) || !empty($i['size'])) {
                         $variantDeduct->execute([
                             $i['qty'],
@@ -341,7 +341,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    // Decrement overall aggregate product stock
                     $stockUpdate->execute([$i['qty'], $i['id'], $i['qty']]);
                     if ($stockUpdate->rowCount() !== 1) {
                         throw new RuntimeException('Aggregate inventory changed during checkout.');
@@ -356,6 +355,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $i['sku'] ?? null,
                         $i['qty'],
                         $i['price'],
+                        $i['cost_price'], // <--- Cost price snapshot saved!
                         $i['line_total']
                     ]);
                 }
@@ -379,7 +379,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $s->execute([$orderId]);
                 $mailItems = $s->fetchAll();
 
-                // Format item names to include both colors & sizes for emails
                 foreach ($mailItems as &$mi) {
                     $details = [];
                     if (!empty($mi['color'])) $details[] = 'Color: ' . $mi['color'];

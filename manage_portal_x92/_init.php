@@ -45,9 +45,11 @@ function admin_header(string $title): void
                 <a href="<?= e(url('admin/system/settings')) ?>">Store branding</a>
                 <a href="<?= e(url('admin/system/theme')) ?>">Storefront Theme</a>
                 <a href="<?= e(url('admin/system/api-keys')) ?>">API Integrations</a>
+                <a href="<?= e(url('admin/system/accounting')) ?>">Accounting</a>
                 <a href="<?= e(url('admin/system/maintenance')) ?>" class="admin-nav-item">Maintenance Mode</a>
                 <a href="<?= e(url('admin/system/env')) ?>">ENV Configuration</a>
                 <a href="<?= e(url('admin/system/security')) ?>">Admin Security & Sessions</a>
+
                 <?php if (is_super_admin()): ?>
                     <a href="<?= e(url('admin/system/activity-logs')) ?>" class="nav-item">
                         📋 System Activity Logs

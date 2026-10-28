@@ -54,6 +54,7 @@ RewriteRule ^admin/system/contacts/?$ manage_portal_x92/system/contacts.php [L,Q
 RewriteRule ^admin/system/reports/?$ manage_portal_x92/system/reports.php [L,QSA]
 RewriteRule ^admin/system/env$ manage_portal_x92/system/env.php [L,QSA]
 RewriteRule ^admin/system/activity-logs/?$ manage_portal_x92/system/activity_logs.php [L,QSA]
+RewriteRule ^admin/system/accounting/?$ manage_portal_x92/system/accounting.php [L,QSA]
 
 # Dynamic Fallback Rule
 RewriteCond %{REQUEST_FILENAME} !-f

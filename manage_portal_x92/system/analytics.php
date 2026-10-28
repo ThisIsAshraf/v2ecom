@@ -41,7 +41,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     log_admin_activity('analytics', 'export_report', "Exported executive analytics report for range: {$rangeLabel}");
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Date/Hour', 'Page Views', 'Unique Visitors', 'Valid Orders', 'Gross Revenue (Tk)', 'Avg Order Value (Tk)']);
+    fputcsv($out, ['Date/Hour', 'Page Views', 'Unique Visitors', 'Valid Orders', 'Gross Revenue (Tk)', 'Est. COGS (Tk)', 'Net Profit (Tk)', 'Avg Order Value (Tk)']);
 
     if ($range === 'today') {
         $expStmt = db()->query("
@@ -50,7 +50,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 COALESCE(v.visits, 0) AS visits,
                 COALESCE(v.unique_visits, 0) AS unique_visits,
                 COALESCE(o.orders, 0) AS orders,
-                COALESCE(o.revenue, 0) AS revenue
+                COALESCE(o.revenue, 0) AS revenue,
+                COALESCE(o.cogs, 0) AS cogs
             FROM (
                 SELECT 0 AS hr UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 
                 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 
@@ -62,8 +63,18 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 FROM visitor_logs WHERE DATE(created_at) = CURDATE() GROUP BY HOUR(created_at)
             ) v ON v.hr = HOURS.hr
             LEFT JOIN (
-                SELECT HOUR(created_at) AS hr, COUNT(*) AS orders, SUM(total) AS revenue
-                FROM orders WHERE status NOT IN ('cancelled', 'returned') AND DATE(created_at) = CURDATE() GROUP BY HOUR(created_at)
+                SELECT 
+                    HOUR(o.created_at) AS hr, 
+                    COUNT(DISTINCT o.id) AS orders, 
+                    SUM(o.total) AS revenue,
+                    SUM(c.item_cogs) AS cogs
+                FROM orders o
+                LEFT JOIN (
+                    SELECT order_id, SUM(quantity * cost_price) AS item_cogs 
+                    FROM order_items GROUP BY order_id
+                ) c ON c.order_id = o.id
+                WHERE o.status NOT IN ('cancelled', 'returned') AND DATE(o.created_at) = CURDATE() 
+                GROUP BY HOUR(o.created_at)
             ) o ON o.hr = HOURS.hr
             ORDER BY HOURS.hr ASC
         ");
@@ -74,7 +85,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 COALESCE(v.visits, 0) AS visits,
                 COALESCE(v.unique_visits, 0) AS unique_visits,
                 COALESCE(o.orders, 0) AS orders,
-                COALESCE(o.revenue, 0) AS revenue
+                COALESCE(o.revenue, 0) AS revenue,
+                COALESCE(o.cogs, 0) AS cogs
             FROM (
                 SELECT DATE(DATE_SUB(?, INTERVAL seq DAY)) AS dt
                 FROM (
@@ -91,8 +103,18 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 FROM visitor_logs WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY DATE(created_at)
             ) v ON v.dt = d.dt
             LEFT JOIN (
-                SELECT DATE(created_at) AS dt, COUNT(*) AS orders, SUM(total) AS revenue
-                FROM orders WHERE status NOT IN ('cancelled', 'returned') AND DATE(created_at) BETWEEN ? AND ? GROUP BY DATE(created_at)
+                SELECT 
+                    DATE(o.created_at) AS dt, 
+                    COUNT(DISTINCT o.id) AS orders, 
+                    SUM(o.total) AS revenue,
+                    SUM(c.item_cogs) AS cogs
+                FROM orders o
+                LEFT JOIN (
+                    SELECT order_id, SUM(quantity * cost_price) AS item_cogs 
+                    FROM order_items GROUP BY order_id
+                ) c ON c.order_id = o.id
+                WHERE o.status NOT IN ('cancelled', 'returned') AND DATE(o.created_at) BETWEEN ? AND ? 
+                GROUP BY DATE(o.created_at)
             ) o ON o.dt = d.dt
             ORDER BY d.dt ASC
         ");
@@ -102,14 +124,16 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     while ($r = $expStmt->fetch(PDO::FETCH_ASSOC)) {
         $ordCount = (int)$r['orders'];
         $revVal   = (float)$r['revenue'];
+        $cogsVal  = (float)$r['cogs'];
+        $profit   = $revVal - $cogsVal;
         $aovVal   = $ordCount > 0 ? round($revVal / $ordCount, 2) : 0.0;
-        fputcsv($out, [$r['label_key'], $r['visits'], $r['unique_visits'], $ordCount, number_format($revVal, 2), number_format($aovVal, 2)]);
+        fputcsv($out, [$r['label_key'], $r['visits'], $r['unique_visits'], $ordCount, number_format($revVal, 2), number_format($cogsVal, 2), number_format($profit, 2), number_format($aovVal, 2)]);
     }
     fclose($out);
     exit;
 }
 
-// --- 3. CURRENT vs PRIOR PERIOD METRICS ---
+// --- 3. CURRENT vs PRIOR PERIOD METRICS (INCL. PROFIT & COGS) ---
 function getPeriodStats($sDate, $eDate)
 {
     $st = db()->prepare("
@@ -117,9 +141,13 @@ function getPeriodStats($sDate, $eDate)
             (SELECT COUNT(*) FROM visitor_logs WHERE DATE(created_at) BETWEEN ? AND ?) AS views,
             (SELECT COUNT(DISTINCT ip_address) FROM visitor_logs WHERE DATE(created_at) BETWEEN ? AND ?) AS uniques,
             (SELECT COUNT(*) FROM orders WHERE status NOT IN ('cancelled', 'returned') AND DATE(created_at) BETWEEN ? AND ?) AS orders,
-            (SELECT COALESCE(SUM(total), 0) FROM orders WHERE status NOT IN ('cancelled', 'returned') AND DATE(created_at) BETWEEN ? AND ?) AS revenue
+            (SELECT COALESCE(SUM(total), 0) FROM orders WHERE status NOT IN ('cancelled', 'returned') AND DATE(created_at) BETWEEN ? AND ?) AS revenue,
+            (SELECT COALESCE(SUM(oi.quantity * oi.cost_price), 0) 
+             FROM order_items oi 
+             JOIN orders o ON o.id = oi.order_id 
+             WHERE o.status NOT IN ('cancelled', 'returned') AND DATE(o.created_at) BETWEEN ? AND ?) AS cogs
     ");
-    $st->execute([$sDate, $eDate, $sDate, $eDate, $sDate, $eDate, $sDate, $eDate]);
+    $st->execute([$sDate, $eDate, $sDate, $eDate, $sDate, $eDate, $sDate, $eDate, $sDate, $eDate]);
     return $st->fetch(PDO::FETCH_ASSOC);
 }
 
@@ -130,11 +158,15 @@ $viewsCurr   = (int)($curr['views'] ?? 0);
 $uniquesCurr = (int)($curr['uniques'] ?? 0);
 $ordersCurr  = (int)($curr['orders'] ?? 0);
 $revenueCurr = (float)($curr['revenue'] ?? 0.0);
+$cogsCurr    = (float)($curr['cogs'] ?? 0.0);
+$profitCurr  = $revenueCurr - $cogsCurr;
 
 $viewsPrev   = (int)($prev['views'] ?? 0);
 $uniquesPrev = (int)($prev['uniques'] ?? 0);
 $ordersPrev  = (int)($prev['orders'] ?? 0);
 $revenuePrev = (float)($prev['revenue'] ?? 0.0);
+$cogsPrev    = (float)($prev['cogs'] ?? 0.0);
+$profitPrev  = $revenuePrev - $cogsPrev;
 
 function calcDeltaPercent($current, $previous)
 {
@@ -146,9 +178,11 @@ $deltaViews   = calcDeltaPercent($viewsCurr, $viewsPrev);
 $deltaUniques = calcDeltaPercent($uniquesCurr, $uniquesPrev);
 $deltaOrders  = calcDeltaPercent($ordersCurr, $ordersPrev);
 $deltaRevenue = calcDeltaPercent($revenueCurr, $revenuePrev);
+$deltaProfit  = calcDeltaPercent($profitCurr, $profitPrev);
 
-$aovCurr  = $ordersCurr > 0 ? round($revenueCurr / $ordersCurr, 2) : 0.0;
-$convCurr = $uniquesCurr > 0 ? round(($ordersCurr / $uniquesCurr) * 100, 2) : 0.0;
+$aovCurr    = $ordersCurr > 0 ? round($revenueCurr / $ordersCurr, 2) : 0.0;
+$convCurr   = $uniquesCurr > 0 ? round(($ordersCurr / $uniquesCurr) * 100, 2) : 0.0;
+$marginCurr = $revenueCurr > 0 ? round(($profitCurr / $revenueCurr) * 100, 1) : 0.0;
 
 // --- 4. DEVICE & TRAFFIC ATTRIBUTION ---
 $deviceStmt = db()->prepare("
@@ -260,11 +294,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             <h3 style="color: #0f172a; font-size: 15px; margin-bottom: 10px;">📈 Key Performance Indicators</h3>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
                 <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Gross Revenue</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #16a34a; font-size: 16px;">' . money($revenueCurr) . '</td></tr>
-                <tr><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Valid Orders</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #2563eb;">' . number_format($ordersCurr) . '</td></tr>
-                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Page Views</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold;">' . number_format($viewsCurr) . '</td></tr>
-                <tr><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Unique Visitors</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #0d9488;">' . number_format($uniquesCurr) . '</td></tr>
-                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Conversion Rate</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #d97706;">' . $convCurr . '%</td></tr>
-                <tr><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Average Order Value (AOV)</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #4f46e5;">' . money($aovCurr) . '</td></tr>
+                <tr><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Est. Net Profit</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #2563eb; font-size: 16px;">' . money($profitCurr) . ' (' . $marginCurr . '%)</td></tr>
+                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Valid Orders</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #2563eb;">' . number_format($ordersCurr) . '</td></tr>
+                <tr><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Page Views</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold;">' . number_format($viewsCurr) . '</td></tr>
+                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Unique Visitors</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #0d9488;">' . number_format($uniquesCurr) . '</td></tr>
+                <tr><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Conversion Rate</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #d97706;">' . $convCurr . '%</td></tr>
+                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold;">Average Order Value (AOV)</td><td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #4f46e5;">' . money($aovCurr) . '</td></tr>
             </table>
 
             <h3 style="color: #0f172a; font-size: 15px; margin-bottom: 8px;">🏆 Best Selling Products</h3>
@@ -432,7 +467,7 @@ admin_header($title); ?>
 
     .grid-kpi {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 16px;
         margin-bottom: 24px;
     }
@@ -454,7 +489,7 @@ admin_header($title); ?>
     }
 
     .kpi-card .value {
-        font-size: 26px;
+        font-size: 24px;
         font-weight: 800;
         color: #0f172a;
         line-height: 1.2;
@@ -586,7 +621,7 @@ admin_header($title); ?>
         <?= $advisoryMessage ?>
     </div>
 
-    <!-- KPI Metrics Grid with Comparison Deltas -->
+    <!-- KPI Metrics Grid with Comparison Deltas & Net Profit -->
     <div class="grid-kpi">
         <div class="kpi-card">
             <h3>Gross Revenue</h3>
@@ -597,18 +632,24 @@ admin_header($title); ?>
         </div>
 
         <div class="kpi-card">
-            <h3>Completed Orders</h3>
-            <div class="value"><?= number_format($ordersCurr) ?></div>
-            <span class="delta-tag <?= $deltaOrders >= 0 ? 'delta-up' : 'delta-down' ?>">
-                <?= $deltaOrders >= 0 ? '▲' : '▼' ?> <?= abs($deltaOrders) ?>% vs prior
+            <h3>Est. Net Profit</h3>
+            <div class="value" style="color: #16a34a;"><?= money($profitCurr) ?></div>
+            <span class="delta-tag <?= $deltaProfit >= 0 ? 'delta-up' : 'delta-down' ?>">
+                <?= $deltaProfit >= 0 ? '▲' : '▼' ?> <?= abs($deltaProfit) ?>% vs prior
             </span>
         </div>
 
         <div class="kpi-card">
-            <h3>Unique Visitors</h3>
-            <div class="value"><?= number_format($uniquesCurr) ?></div>
-            <span class="delta-tag <?= $deltaUniques >= 0 ? 'delta-up' : 'delta-down' ?>">
-                <?= $deltaUniques >= 0 ? '▲' : '▼' ?> <?= abs($deltaUniques) ?>% vs prior
+            <h3>Profit Margin</h3>
+            <div class="value" style="color: #2563eb;"><?= $marginCurr ?>%</div>
+            <span class="muted small" style="display:block; margin-top:4px;">Net Profit / Revenue</span>
+        </div>
+
+        <div class="kpi-card">
+            <h3>Completed Orders</h3>
+            <div class="value"><?= number_format($ordersCurr) ?></div>
+            <span class="delta-tag <?= $deltaOrders >= 0 ? 'delta-up' : 'delta-down' ?>">
+                <?= $deltaOrders >= 0 ? '▲' : '▼' ?> <?= abs($deltaOrders) ?>% vs prior
             </span>
         </div>
 

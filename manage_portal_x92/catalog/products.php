@@ -11,9 +11,9 @@ if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
     header('Content-Disposition: attachment; filename="products-import-sample.csv"');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['name', 'sku', 'category', 'price', 'compare_price', 'stock', 'colors', 'sizes', 'description', 'image_url']);
-    fputcsv($out, ['Cotton Oxford Shirt', 'SHIRT-OX-001', 'Men Casual', '1450.00', '1850.00', '25', 'White,Blue,Black', 'S,M,L,XL', 'Premium breathable cotton shirt.', 'https://example.com/shirt.jpg']);
-    fputcsv($out, ['Floral Printed Kurti', 'KURTI-FL-002', 'Women Ethnic', '2200.00', '2600.00', '15', 'Red,Green', 'M,L,XL', 'Lightweight 3-piece set with dupatta.', '']);
+    fputcsv($out, ['name', 'sku', 'category', 'cost_price', 'price', 'compare_price', 'stock', 'colors', 'sizes', 'description', 'image_url']);
+    fputcsv($out, ['Cotton Oxford Shirt', 'SHIRT-OX-001', 'Men Casual', '850.00', '1450.00', '1850.00', '25', 'White,Blue,Black', 'S,M,L,XL', 'Premium breathable cotton shirt.', 'https://example.com/shirt.jpg']);
+    fputcsv($out, ['Floral Printed Kurti', 'KURTI-FL-002', 'Women Ethnic', '1200.00', '2200.00', '2600.00', '15', 'Red,Green', 'M,L,XL', 'Lightweight 3-piece set with dupatta.', '']);
     fclose($out);
     exit;
 }
@@ -27,7 +27,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     log_admin_activity('products', 'export_csv', 'Exported products inventory catalog to CSV');
 
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Product ID', 'Name', 'SKU', 'Category', 'Price', 'Compare-at Price', 'Total Stock', 'Colors', 'Sizes', 'Status', 'Image URL']);
+    fputcsv($out, ['Product ID', 'Name', 'SKU', 'Category', 'Cost Price', 'Price', 'Compare-at Price', 'Total Stock', 'Colors', 'Sizes', 'Status', 'Image URL']);
 
     $exportQuery = 'SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.id DESC';
     $exportStmt = db()->query($exportQuery);
@@ -37,6 +37,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['name'],
             $row['sku'],
             $row['category_name'] ?? 'Uncategorised',
+            number_format((float)($row['cost_price'] ?? 0), 2),
             $row['price'],
             $row['compare_price'] ?? '0.00',
             $row['stock'],
@@ -98,13 +99,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $name      = trim((string)($row[$headerMap['name'] ?? 0] ?? ''));
             $sku       = trim((string)($row[$headerMap['sku'] ?? 1] ?? ''));
             $catName   = trim((string)($row[$headerMap['category'] ?? 2] ?? ''));
-            $price     = (float)($row[$headerMap['price'] ?? 3] ?? 0);
-            $compare   = (float)($row[$headerMap['compare_price'] ?? 4] ?? 0);
-            $stock     = max(0, (int)($row[$headerMap['stock'] ?? 5] ?? 0));
-            $rowColors = trim((string)($row[$headerMap['colors'] ?? 6] ?? ''));
-            $rowSizes  = trim((string)($row[$headerMap['sizes'] ?? 7] ?? ''));
-            $desc      = trim((string)($row[$headerMap['description'] ?? 8] ?? ''));
-            $imageUrl  = trim((string)($row[$headerMap['image_url'] ?? 9] ?? ''));
+            $costPrice = (float)($row[$headerMap['cost_price'] ?? 3] ?? 0);
+            $price     = (float)($row[$headerMap['price'] ?? 4] ?? 0);
+            $compare   = (float)($row[$headerMap['compare_price'] ?? 5] ?? 0);
+            $stock     = max(0, (int)($row[$headerMap['stock'] ?? 6] ?? 0));
+            $rowColors = trim((string)($row[$headerMap['colors'] ?? 7] ?? ''));
+            $rowSizes  = trim((string)($row[$headerMap['sizes'] ?? 8] ?? ''));
+            $desc      = trim((string)($row[$headerMap['description'] ?? 9] ?? ''));
+            $imageUrl  = trim((string)($row[$headerMap['image_url'] ?? 10] ?? ''));
 
             if ($name === '' || $sku === '' || $price < 0) {
                 $skipped++;
@@ -135,12 +137,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $existingProduct = $checkProduct->fetch();
 
             if ($existingProduct) {
-                $up = db()->prepare('UPDATE products SET category_id=?, name=?, slug=?, description=?, price=?, compare_price=?, image_url=?, stock=?, colors=?, sizes=? WHERE id=?');
-                $up->execute([$catId, $name, $slug, $desc, $price, $compare ?: null, $imageUrl, $stock, $rowColors, $rowSizes, $existingProduct['id']]);
+                $up = db()->prepare('UPDATE products SET category_id=?, name=?, slug=?, description=?, cost_price=?, price=?, compare_price=?, image_url=?, stock=?, colors=?, sizes=? WHERE id=?');
+                $up->execute([$catId, $name, $slug, $desc, $costPrice, $price, $compare ?: null, $imageUrl, $stock, $rowColors, $rowSizes, $existingProduct['id']]);
                 $updated++;
             } else {
-                $ins = db()->prepare('INSERT INTO products (category_id, name, slug, sku, description, price, compare_price, image_url, stock, colors, sizes, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
-                $ins->execute([$catId, $name, $slug, $sku, $desc, $price, $compare ?: null, $imageUrl, $stock, $rowColors, $rowSizes]);
+                $ins = db()->prepare('INSERT INTO products (category_id, name, slug, sku, description, cost_price, price, compare_price, image_url, stock, colors, sizes, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
+                $ins->execute([$catId, $name, $slug, $sku, $desc, $costPrice, $price, $compare ?: null, $imageUrl, $stock, $rowColors, $rowSizes]);
                 $imported++;
             }
         }
@@ -151,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/catalog/products');
     }
 
-    // --- GALLERY IMAGE DELETION (Invoked outside main form) ---
+    // --- GALLERY IMAGE DELETION ---
     if ($action === 'delete_gallery_image') {
         $imgId = (int)($_POST['image_id'] ?? 0);
         $prodId = (int)($_POST['product_id'] ?? 0);
@@ -251,6 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        $costPrice = max(0.0, (float)($_POST['cost_price'] ?? 0));
         $price = (float)($_POST['price'] ?? 0);
         $compare = (float)($_POST['compare_price'] ?? 0);
         $active = isset($_POST['active']) ? 1 : 0;
@@ -270,14 +273,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } elseif ($id > 0 && $img === '') {
-            // Retain existing image if not replacing
             $prevImg = db()->prepare('SELECT image_url FROM products WHERE id = ?');
             $prevImg->execute([$id]);
             $img = (string)$prevImg->fetchColumn();
         }
 
         if ($name === '' || $sku === '' || $price < 0) {
-            flash('error', 'Name, SKU and a valid price are required.');
+            flash('error', 'Name, SKU and a valid selling price are required.');
             redirect($id ? ('admin/catalog/products?edit=' . $id) : 'admin/catalog/products');
         }
 
@@ -286,20 +288,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
 
             if ($id) {
-                $s = $pdo->prepare('UPDATE products SET category_id=?,name=?,slug=?,sku=?,description=?,price=?,compare_price=?,image_url=?,stock=?,colors=?,sizes=?,active=? WHERE id=?');
-                $s->execute([$cat, $name, $slug, $sku, $desc, $price, $compare ?: null, $img, $stock, $colorsString, $sizesString, $active, $id]);
+                $s = $pdo->prepare('UPDATE products SET category_id=?,name=?,slug=?,sku=?,description=?,cost_price=?,price=?,compare_price=?,image_url=?,stock=?,colors=?,sizes=?,active=? WHERE id=?');
+                $s->execute([$cat, $name, $slug, $sku, $desc, $costPrice, $price, $compare ?: null, $img, $stock, $colorsString, $sizesString, $active, $id]);
                 $productId = $id;
 
-                log_admin_activity('products', 'update_product', "Updated product '{$name}' (ID: #{$id}, Stock: {$stock})");
+                log_admin_activity('products', 'update_product', "Updated product '{$name}' (ID: #{$id}, Cost: {$costPrice}, Price: {$price})");
             } else {
-                $s = $pdo->prepare('INSERT INTO products(category_id,name,slug,sku,description,price,compare_price,image_url,stock,colors,sizes,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
-                $s->execute([$cat, $name, $slug, $sku, $desc, $price, $compare ?: null, $img, $stock, $colorsString, $sizesString, $active]);
+                $s = $pdo->prepare('INSERT INTO products(category_id,name,slug,sku,description,cost_price,price,compare_price,image_url,stock,colors,sizes,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                $s->execute([$cat, $name, $slug, $sku, $desc, $costPrice, $price, $compare ?: null, $img, $stock, $colorsString, $sizesString, $active]);
                 $productId = (int)$pdo->lastInsertId();
 
-                log_admin_activity('products', 'create_product', "Created product '{$name}' (ID: #{$productId}, Stock: {$stock})");
+                log_admin_activity('products', 'create_product', "Created product '{$name}' (ID: #{$productId}, Cost: {$costPrice}, Price: {$price})");
             }
 
-            // Sync Multi-Variant Records into product_variants table
+            // Sync Multi-Variant Records
             if (!empty($variantsToSync)) {
                 $keepIds = [];
 
@@ -326,7 +328,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Delete removed variants
                 if (!empty($keepIds)) {
                     $inMarks = implode(',', array_fill(0, count($keepIds), '?'));
                     $delStmt = $pdo->prepare("DELETE FROM product_variants WHERE product_id = ? AND id NOT IN ($inMarks)");
@@ -357,7 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $pdo->commit();
-            flash('success', 'Product and variant matrix saved successfully.');
+            flash('success', 'Product saved successfully.');
             redirect('admin/catalog/products?edit=' . $productId);
         } catch (Throwable $e) {
             if (db()->inTransaction()) db()->rollBack();
@@ -387,7 +388,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $edit = null;
 $galleryImages = [];
-$currentVariants = []; // Map "color||size" => [stock, sku, price]
+$currentVariants = [];
 
 if (isset($_GET['edit'])) {
     $s = db()->prepare('SELECT * FROM products WHERE id=?');
@@ -398,7 +399,6 @@ if (isset($_GET['edit'])) {
         $gs->execute([$edit['id']]);
         $galleryImages = $gs->fetchAll();
 
-        // Fetch existing variants
         $vStmt = db()->prepare('SELECT * FROM product_variants WHERE product_id=? ORDER BY id ASC');
         $vStmt->execute([$edit['id']]);
         $rows = $vStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -494,13 +494,21 @@ admin_header('Products & Inventory'); ?>
                 </select>
             </div>
             <div class="field"><label>Or Create Category</label><input name="new_category" placeholder="New category name"></div>
-            <div class="field"><label>Base Price (৳) *</label><input type="number" min="0" step="0.01" name="price" required value="<?= e((string)($edit['price'] ?? '')) ?>"></div>
+
+            <!-- COST PRICE FIELD FOR PROFIT CALCULATION -->
+            <div class="field">
+                <label>Cost Price / COGS (৳)</label>
+                <input type="number" min="0" step="0.01" name="cost_price" value="<?= e((string)($edit['cost_price'] ?? '0.00')) ?>" placeholder="Purchase cost per unit">
+                <small class="muted">Your cost to purchase/manufacture this item.</small>
+            </div>
+
+            <div class="field"><label>Selling Price (৳) *</label><input type="number" min="0" step="0.01" name="price" required value="<?= e((string)($edit['price'] ?? '')) ?>"></div>
             <div class="field"><label>Compare-at price</label><input type="number" min="0" step="0.01" name="compare_price" value="<?= e((string)($edit['compare_price'] ?? '')) ?>"></div>
 
             <div class="field">
                 <label>Standard / Fallback Stock</label>
                 <input type="number" min="0" name="stock" id="main_stock_input" value="<?= e((string)($edit['stock'] ?? 0)) ?>">
-                <small class="muted" style="display:block; margin-top:3px;">Note: If Color/Size variants below are enabled, this total is calculated automatically from the matrix.</small>
+                <small class="muted" style="display:block; margin-top:3px;">Note: Calculated automatically from matrix if variants are enabled.</small>
             </div>
 
             <div class="field"><label>Main Cover Image</label><input type="file" name="image_file" accept="image/*"></div>
@@ -520,7 +528,6 @@ admin_header('Products & Inventory'); ?>
             <div style="margin-bottom:15px; background:#fff; padding:12px; border-radius:6px; border:1px solid #e2e8f0;">
                 <label style="font-weight:700; font-size:13px; color:#334155;">Available Colors (Comma-separated)</label>
                 <input type="text" id="colorsInput" name="colors" value="<?= e($edit['colors'] ?? '') ?>" placeholder="e.g. Red, Black, Navy Blue, White" style="margin-top:4px; font-size:13px;">
-                <small class="muted">Leave blank if this product does not have color options.</small>
             </div>
 
             <!-- Sizes Selector -->
@@ -601,7 +608,7 @@ admin_header('Products & Inventory'); ?>
             <input type="file" name="gallery_files[]" multiple accept="image/*">
         </div>
 
-        <!-- Current Gallery Photos with NON-NESTED Delete Buttons -->
+        <!-- Current Gallery Photos -->
         <?php if ($galleryImages): ?>
             <div style="margin: 15px 0;">
                 <label><b>Current Gallery Photos:</b></label>
@@ -625,7 +632,7 @@ admin_header('Products & Inventory'); ?>
     </form>
 </div>
 
-<!-- Standalone Hidden Form for Gallery Image Deletions (OUTSIDE productMainForm) -->
+<!-- Standalone Hidden Form for Gallery Image Deletions -->
 <form id="standaloneGalleryDeleteForm" method="post" style="display:none;">
     <?= csrf_field() ?>
     <input type="hidden" name="action" value="delete_gallery_image">
@@ -659,7 +666,9 @@ admin_header('Products & Inventory'); ?>
                     <th>Product / SKU</th>
                     <th>Category</th>
                     <th>Variants & Stock Breakdown</th>
-                    <th>Price</th>
+                    <th>Cost Price</th>
+                    <th>Selling Price</th>
+                    <th>Gross Margin</th>
                     <th>Total Stock</th>
                     <th>State</th>
                     <th>Action</th>
@@ -668,10 +677,14 @@ admin_header('Products & Inventory'); ?>
             <tbody>
                 <?php if (empty($products)): ?>
                     <tr>
-                        <td colspan="8" style="text-align:center; padding:20px;" class="muted">No products found.</td>
+                        <td colspan="10" style="text-align:center; padding:20px;" class="muted">No products found.</td>
                     </tr>
                 <?php else: ?>
-                    <?php foreach ($products as $p): ?>
+                    <?php foreach ($products as $p):
+                        $cPrice = (float)($p['cost_price'] ?? 0);
+                        $sPrice = (float)($p['price'] ?? 0);
+                        $margin = $sPrice > 0 ? round((($sPrice - $cPrice) / $sPrice) * 100, 1) : 0;
+                    ?>
                         <tr>
                             <td>
                                 <?php if (!empty($p['image_url'])): ?>
@@ -702,13 +715,17 @@ admin_header('Products & Inventory'); ?>
                                             </span>
                                         <?php endforeach; ?>
                                     </div>
-                                <?php elseif (!empty($p['sizes']) || !empty($p['colors'])): ?>
-                                    <span class="muted small">Sizes: <?= e($p['sizes'] ?: '—') ?> | Colors: <?= e($p['colors'] ?: '—') ?></span>
                                 <?php else: ?>
                                     <span class="muted small">—</span>
                                 <?php endif; ?>
                             </td>
-                            <td><?= money($p['price']) ?></td>
+                            <td class="muted"><?= money($cPrice) ?></td>
+                            <td><b><?= money($sPrice) ?></b></td>
+                            <td>
+                                <span style="font-weight:bold; font-size:12px; color: <?= $margin >= 30 ? '#16a34a' : ($margin > 0 ? '#d97706' : '#dc2626') ?>;">
+                                    <?= $margin ?>%
+                                </span>
+                            </td>
                             <td><span class="<?= ((int)$p['stock'] <= 5) ? 'notice error' : 'status' ?>"><?= (int)$p['stock'] ?></span></td>
                             <td><?= !empty($p['active']) ? 'Active' : 'Hidden' ?></td>
                             <td>
@@ -793,7 +810,6 @@ admin_header('Products & Inventory'); ?>
         const baseSku = (document.getElementById('base_sku_input').value || 'SKU').trim();
         const tbody = document.getElementById('matrixTableBody');
 
-        // Preserve existing values entered previously
         const previousData = {};
         tbody.querySelectorAll('tr').forEach(tr => {
             const cb = tr.querySelector('input[type="checkbox"]');

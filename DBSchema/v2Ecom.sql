@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Oct 27, 2026 at 03:21 PM
+-- Generation Time: Oct 28, 2026 at 07:54 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -105,7 +105,8 @@ INSERT INTO `admin_login_logs` (`id`, `admin_id`, `email_attempted`, `ip_address
 (4, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-26 05:53:43'),
 (5, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-26 10:51:40'),
 (6, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36', 'success', '2026-10-26 18:29:20'),
-(7, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'success', '2026-10-27 13:49:25');
+(7, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'success', '2026-10-27 13:49:25'),
+(8, 1, 'alam.office.my@gmail.com', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'success', '2026-10-28 06:22:59');
 
 -- --------------------------------------------------------
 
@@ -126,7 +127,7 @@ CREATE TABLE `admin_sessions` (
 --
 
 INSERT INTO `admin_sessions` (`id`, `admin_id`, `ip_address`, `user_agent`, `last_activity`) VALUES
-('6vqml7huqu27dikiprcs58med2', 1, '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', '2026-10-27 14:09:50');
+('8kp4g8sdm1putfsdoiqgco196q', 1, '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', '2026-10-28 06:51:45');
 
 -- --------------------------------------------------------
 
@@ -303,6 +304,7 @@ CREATE TABLE `order_items` (
   `sku` varchar(80) DEFAULT NULL,
   `quantity` int(10) UNSIGNED NOT NULL,
   `unit_price` decimal(10,2) NOT NULL,
+  `cost_price` decimal(10,2) NOT NULL DEFAULT 0.00,
   `line_total` decimal(10,2) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -335,6 +337,7 @@ CREATE TABLE `products` (
   `sku` varchar(80) NOT NULL,
   `description` text DEFAULT NULL,
   `price` decimal(10,2) NOT NULL,
+  `cost_price` decimal(10,2) NOT NULL DEFAULT 0.00,
   `sizes` varchar(255) DEFAULT '',
   `colors` varchar(255) DEFAULT NULL,
   `compare_price` decimal(10,2) DEFAULT NULL,
@@ -349,9 +352,9 @@ CREATE TABLE `products` (
 -- Dumping data for table `products`
 --
 
-INSERT INTO `products` (`id`, `category_id`, `name`, `slug`, `sku`, `description`, `price`, `sizes`, `colors`, `compare_price`, `image_url`, `stock`, `active`, `created_at`, `updated_at`) VALUES
-(1, 1, 'Cotton Oxford Shirt', 'cotton-oxford-shirt', 'SHIRT-OX-001', 'Premium breathable cotton shirt.', 1450.00, 'S,M,L,XL', 'White,Blue,Black', 1850.00, 'https://example.com/shirt.jpg', 25, 1, '2026-10-26 10:53:04', '2026-10-26 10:53:04'),
-(2, 2, 'Floral Printed Kurti', 'floral-printed-kurti', 'KURTI-FL-002', 'Lightweight 3-piece set with dupatta.', 2200.00, 'M,L,XL', 'Red,Green', 2600.00, '', 15, 1, '2026-10-26 10:53:04', '2026-10-26 10:53:04');
+INSERT INTO `products` (`id`, `category_id`, `name`, `slug`, `sku`, `description`, `price`, `cost_price`, `sizes`, `colors`, `compare_price`, `image_url`, `stock`, `active`, `created_at`, `updated_at`) VALUES
+(1, 1, 'Cotton Oxford Shirt', 'cotton-oxford-shirt', 'SHIRT-OX-001', 'Premium breathable cotton shirt.', 1450.00, 0.00, 'S,M,L,XL', 'White,Blue,Black', 1850.00, 'https://example.com/shirt.jpg', 25, 1, '2026-10-26 10:53:04', '2026-10-26 10:53:04'),
+(2, 2, 'Floral Printed Kurti', 'floral-printed-kurti', 'KURTI-FL-002', 'Lightweight 3-piece set with dupatta.', 2200.00, 0.00, 'M,L,XL', 'Red,Green', 2600.00, '', 15, 1, '2026-10-26 10:53:04', '2026-10-26 10:53:04');
 
 -- --------------------------------------------------------
 
@@ -616,7 +619,12 @@ CREATE TABLE `visitor_logs` (
 --
 
 INSERT INTO `visitor_logs` (`id`, `ip_address`, `page_url`, `user_agent`, `referrer_url`, `device_type`, `browser`, `os`, `created_at`) VALUES
-(1, '::1', '/v2ecom/index.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/index.php', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-27 14:09:29');
+(1, '::1', '/v2ecom/index.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/index.php', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-27 14:09:29'),
+(2, '::1', '/v2ecom/track-order.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/index.php', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-27 14:24:08'),
+(3, '::1', '/v2ecom/admin', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/admin/login', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-28 06:22:59'),
+(4, '::1', '/v2ecom/index.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/admin/system/analytics', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-28 06:27:10'),
+(5, '::1', '/v2ecom/index.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/admin/system/analytics', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-28 06:27:31'),
+(6, '::1', '/v2ecom/index.php', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36', 'http://localhost/v2ecom/admin/system/analytics', 'Desktop', 'Chrome', 'Windows 10/11', '2026-10-28 06:48:13');
 
 --
 -- Indexes for dumped tables
@@ -827,7 +835,7 @@ ALTER TABLE `admin_activity_logs`
 -- AUTO_INCREMENT for table `admin_login_logs`
 --
 ALTER TABLE `admin_login_logs`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
 
 --
 -- AUTO_INCREMENT for table `api_keys`
@@ -941,7 +949,7 @@ ALTER TABLE `users`
 -- AUTO_INCREMENT for table `visitor_logs`
 --
 ALTER TABLE `visitor_logs`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- Constraints for dumped tables
