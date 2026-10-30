@@ -108,9 +108,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $desc      = trim((string)($row[$headerMap['description'] ?? 9] ?? ''));
             $imageUrl  = trim((string)($row[$headerMap['image_url'] ?? 10] ?? ''));
 
-            if ($name === '' || $sku === '' || $price < 0) {
+            if ($name === '' || $price < 0) {
                 $skipped++;
                 continue;
+            }
+
+            // Fallback SKU generator if CSV column is blank
+            if ($sku === '') {
+                $sku = 'SKU-' . strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 4)) . '-' . rand(100, 999);
             }
 
             $catId = null;
@@ -180,6 +185,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $slug = $slug ?: strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', $name), '-'));
         $sku = trim((string)($_POST['sku'] ?? ''));
         $desc = trim((string)($_POST['description'] ?? ''));
+
+        // Fallback auto-SKU generation if submitted empty
+        if ($sku === '' && $name !== '') {
+            $sku = 'PRD-' . strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 4)) . '-' . rand(100, 999);
+        }
 
         // Handle Color & Size Multi-Variant Matrix
         $rawColorsInput = trim((string)($_POST['colors'] ?? ''));
@@ -481,19 +491,31 @@ admin_header('Products & Inventory'); ?>
         <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
 
         <div class="form-grid">
-            <div class="field"><label>Product name *</label><input name="name" required value="<?= e($edit['name'] ?? '') ?>"></div>
+            <div class="field"><label>Product name *</label><input name="name" id="product_name_input" required value="<?= e($edit['name'] ?? '') ?>" placeholder="e.g. Cotton Oxford Shirt"></div>
             <div class="field"><label>Slug (URL)</label><input name="slug" value="<?= e($edit['slug'] ?? '') ?>" placeholder="auto-generated if blank"></div>
-            <div class="field"><label>Base SKU *</label><input name="sku" id="base_sku_input" required value="<?= e($edit['sku'] ?? '') ?>"></div>
+
+            <!-- ENHANCED SKU FIELD WITH OPTION A (AUTO-GENERATOR) -->
+            <div class="field">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <label style="margin:0;">Base SKU *</label>
+                    <button type="button" onclick="generateSmartSku()" class="button secondary" style="padding:2px 8px; font-size:11px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700;">
+                        ⚡ Generate SKU
+                    </button>
+                </div>
+                <input name="sku" id="base_sku_input" required value="<?= e($edit['sku'] ?? '') ?>" placeholder="Click Generate or enter custom">
+                <small class="muted" style="display:block; margin-top:2px;">Format: [CAT]-[NAME]-[RANDOM]. Suffixes automatically add to variants.</small>
+            </div>
+
             <div class="field">
                 <label>Category</label>
-                <select name="category_id">
+                <select name="category_id" id="category_select">
                     <option value="">Uncategorised</option>
                     <?php foreach ($cats as $c): ?>
                         <option value="<?= $c['id'] ?>" <?= ((int)($edit['category_id'] ?? 0) === (int)$c['id']) ? 'selected' : '' ?>><?= e($c['name']) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="field"><label>Or Create Category</label><input name="new_category" placeholder="New category name"></div>
+            <div class="field"><label>Or Create Category</label><input name="new_category" id="new_category_input" placeholder="New category name"></div>
 
             <!-- COST PRICE FIELD FOR PROFIT CALCULATION -->
             <div class="field">
@@ -757,6 +779,66 @@ admin_header('Products & Inventory'); ?>
 </div>
 
 <script>
+    // --- SMART SKU AUTO-GENERATOR (Option A) ---
+    function generateSmartSku() {
+        const nameInput = document.getElementById('product_name_input');
+        const catSelect = document.getElementById('category_select');
+        const newCatInput = document.getElementById('new_category_input');
+        const skuInput = document.getElementById('base_sku_input');
+
+        const rawName = nameInput ? nameInput.value.trim() : '';
+        if (!rawName) {
+            alert('Please enter a product name first before generating an SKU.');
+            if (nameInput) nameInput.focus();
+            return;
+        }
+
+        // 1. Resolve Category Code
+        let catCode = 'PRD';
+        const newCat = newCatInput ? newCatInput.value.trim() : '';
+        if (newCat) {
+            catCode = newCat.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3);
+        } else if (catSelect && catSelect.selectedIndex > 0) {
+            const catName = catSelect.options[catSelect.selectedIndex].text.trim();
+            catCode = catName.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3);
+        }
+
+        // 2. Resolve Product Name Code
+        const words = rawName.split(/\s+/).filter(w => w.length > 0);
+        let nameCode = '';
+        if (words.length >= 2) {
+            nameCode = words.map(w => w.slice(0, 2)).join('').toUpperCase().slice(0, 6);
+        } else if (words.length === 1) {
+            nameCode = words[0].toUpperCase().slice(0, 4);
+        }
+
+        // 3. Random 3-digit salt
+        const randomNum = Math.floor(100 + Math.random() * 900);
+
+        const generatedSku = `${catCode}-${nameCode}-${randomNum}`.replace(/-+/g, '-');
+        skuInput.value = generatedSku;
+
+        // Auto-update any existing variant SKUs in matrix
+        updateMatrixVariantSkus(generatedSku);
+    }
+
+    function updateMatrixVariantSkus(newBaseSku) {
+        const rows = document.querySelectorAll('#matrixTableBody tr');
+        rows.forEach(tr => {
+            const cb = tr.querySelector('input[type="checkbox"]');
+            const skuInput = tr.querySelector('.v-input-sku');
+            if (cb && skuInput) {
+                const parts = cb.value.split('||');
+                const col = (parts[0] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                const sz = (parts[1] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                let vSku = newBaseSku;
+                if (col) vSku += '-' + col;
+                if (sz) vSku += '-' + sz;
+                skuInput.value = vSku;
+            }
+        });
+    }
+
     function deleteGalleryPhoto(imgId, prodId) {
         if (confirm('Delete this gallery photo?')) {
             document.getElementById('deleteGalleryImageId').value = imgId;
