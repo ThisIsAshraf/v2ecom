@@ -43,7 +43,19 @@ if (!function_exists('db')) {
         static $pdo = null;
         if ($pdo instanceof PDO) return $pdo;
         $dsn = 'mysql:host=' . envv('DB_HOST', '127.0.0.1') . ';port=' . envv('DB_PORT', '3306') . ';dbname=' . envv('DB_NAME', 'v2ecom') . ';charset=utf8mb4';
-        $pdo = new PDO($dsn, envv('DB_USER', 'root'), envv('DB_PASS', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]);
+        $pdo = new PDO($dsn, envv('DB_USER', 'root'), envv('DB_PASS', ''), [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false
+        ]);
+
+        // Force MySQL session timezone to match application timezone on shared/cloud hosts (e.g. InfinityFree)
+        try {
+            $pdo->exec("SET time_zone = '+06:00'");
+        } catch (Throwable $e) {
+            // Silently fall back if DB host restricts timezone table manipulation
+        }
+
         return $pdo;
     }
 }
@@ -433,7 +445,6 @@ if (!function_exists('email_admin_new_order')) {
 if (!function_exists('generate_order_pdf_invoice')) {
     function generate_order_pdf_invoice(string $html): string
     {
-        // If Dompdf is installed via composer, render native PDF
         if (class_exists('\\Dompdf\\Dompdf')) {
             try {
                 $options = new Options();
@@ -482,7 +493,6 @@ if (!function_exists('email_order_customer')) {
             ? '<img src="' . e(url($logoUrl)) . '" alt="' . e($storeName) . '" style="max-height:50px; margin-bottom:10px;">'
             : '<h2 style="color:' . $emailColor . '; margin:0; font-size:24px;">' . e($storeName) . '</h2>';
 
-        // 1. Build Rows for the PDF using money_pdf()
         $pdfRows = '';
         foreach ($items as $i) {
             $pName  = e($i['product_name'] ?? $i['name'] ?? 'Product Item');
@@ -498,7 +508,6 @@ if (!function_exists('email_order_customer')) {
                 </tr>';
         }
 
-        // 2. Build Rows for the Email Body using standard money()
         $emailRows = '';
         foreach ($items as $i) {
             $pName  = e($i['product_name'] ?? $i['name'] ?? 'Product Item');
@@ -514,7 +523,6 @@ if (!function_exists('email_order_customer')) {
                 </tr>';
         }
 
-        // PDF-Optimized Invoice HTML layout (Dompdf compatible)
         $invoiceHtml = '<!doctype html>
 <html>
 <head>
@@ -618,7 +626,6 @@ if (!function_exists('email_order_customer')) {
 </body>
 </html>';
 
-        // Render to PDF
         $pdfBinary = generate_order_pdf_invoice($invoiceHtml);
 
         $attachmentData = $pdfBinary !== '' ? $pdfBinary : $invoiceHtml;
@@ -751,7 +758,6 @@ if (!function_exists('email_user_password_reset')) {
     }
 }
 
-// Check if the currently logged-in admin is a Super Admin
 if (!function_exists('is_super_admin')) {
     function is_super_admin(): bool
     {
@@ -770,7 +776,6 @@ if (!function_exists('is_super_admin')) {
     }
 }
 
-// Check if the active admin has permission for a specific module
 if (!function_exists('has_permission')) {
     function has_permission(string $module): bool
     {
@@ -793,7 +798,6 @@ if (!function_exists('has_permission')) {
     }
 }
 
-// Enforce permission guard on admin pages
 if (!function_exists('require_permission')) {
     function require_permission(string $module): void
     {
@@ -815,7 +819,6 @@ if (!function_exists('sync_htpasswd_user')) {
             @touch($htpasswdPath);
         }
 
-        // Generate Apache SHA1 password hash
         $hash = '{SHA}' . base64_encode(sha1($plainPassword, true));
         $newLine = $username . ':' . $hash;
 
@@ -948,67 +951,104 @@ if (site_setting('maintenance_mode', '0') === '1') {
 }
 
 /**
- * Site Analytics
+ * Site Analytics & Visitor Tracking
+ * Production-hardened storefront visitor tracking (compatible with InfinityFree & Cloudflare)
  */
+if (!function_exists('track_storefront_visitor')) {
+    function track_storefront_visitor(): void
+    {
+        // Don't track CLI, cron, or admin panel routes
+        $uri = $_SERVER['REQUEST_URI'] ?? '';
+        if (php_sapi_name() === 'cli' || str_contains($uri, '/admin') || str_contains($uri, 'manage_portal')) {
+            return;
+        }
 
-// --- AUTOMATIC ENTERPRISE TRAFFIC & DEVICE LOGGER ---
-$reqUri    = $_SERVER['REQUEST_URI'] ?? '';
-$reqMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        // 1. Extract Real Client IP behind InfinityFree / Cloudflare reverse proxies
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $ip = trim($_SERVER['HTTP_CF_CONNECTING_IP']);
+        } elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            $ip = trim($_SERVER['HTTP_X_REAL_IP']);
+        } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $parts = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            $ip = trim($parts[0]);
+        }
 
-$isAdminRoute  = str_contains($reqUri, '/manage_portal_x92/') || str_contains($reqUri, '/admin/');
-$cleanPath     = parse_url($reqUri, PHP_URL_PATH) ?? '';
-$isStaticAsset = preg_match('/\.(ico|png|jpg|jpeg|gif|webp|svg|css|js|map|woff|woff2|ttf)$/i', $cleanPath) === 1;
+        $ua       = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255);
+        $referrer = !empty($_SERVER['HTTP_REFERER']) ? substr($_SERVER['HTTP_REFERER'], 0, 255) : null;
+        $pageUrl  = parse_url($uri, PHP_URL_PATH) ?: '/';
 
-if (!$isAdminRoute && !$isStaticAsset && $reqMethod === 'GET') {
-    $now = microtime(true);
-    $lastHitTime = (float)($_SESSION['_last_traffic_time'] ?? 0);
-    $lastHitUrl  = (string)($_SESSION['_last_traffic_url'] ?? '');
+        // 2. Device Detection
+        $device = 'Desktop';
+        if (preg_match('/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i', $ua)) {
+            $device = 'Tablet';
+        } elseif (preg_match('/(up.browser|up.link|mmp|symbian|smartphone|midp|wap|phone|android|iemobile|mobile|iphone)/i', $ua)) {
+            $device = 'Mobile';
+        }
 
-    if ($cleanPath !== $lastHitUrl || ($now - $lastHitTime) > 2.0) {
-        $_SESSION['_last_traffic_time'] = $now;
-        $_SESSION['_last_traffic_url']  = $cleanPath;
+        // 3. Browser Engine Detection
+        $browser = 'Other';
+        if (preg_match('/Edg/i', $ua)) {
+            $browser = 'Edge';
+        } elseif (preg_match('/Chrome/i', $ua)) {
+            $browser = 'Chrome';
+        } elseif (preg_match('/Firefox/i', $ua)) {
+            $browser = 'Firefox';
+        } elseif (preg_match('/Safari/i', $ua)) {
+            $browser = 'Safari';
+        } elseif (preg_match('/Opera|OPR/i', $ua)) {
+            $browser = 'Opera';
+        }
+
+        // 4. OS Detection
+        $os = 'Other';
+        if (preg_match('/windows|win32/i', $ua)) {
+            $os = 'Windows';
+        } elseif (preg_match('/macintosh|mac os x/i', $ua)) {
+            $os = 'macOS';
+        } elseif (preg_match('/android/i', $ua)) {
+            $os = 'Android';
+        } elseif (preg_match('/iphone|ipad|ipod/i', $ua)) {
+            $os = 'iOS';
+        } elseif (preg_match('/linux/i', $ua)) {
+            $os = 'Linux';
+        }
+
+        // 5. Store using PHP's exact localized datetime (Fixes InfinityFree UTC-7 timezone lag)
+        $currentAppTime = date('Y-m-d H:i:s');
 
         try {
-            $ip       = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-            $url      = substr($cleanPath, 0, 255);
-            $ua       = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
-            $referrer = substr($_SERVER['HTTP_REFERER'] ?? '', 0, 500);
+            $pdo = db();
 
-            // Parse Device Type
-            $device = 'Desktop';
-            if (preg_match('/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i', $ua)) {
-                $device = 'Tablet';
-            } elseif (preg_match('/(Mobile|iPod|iPhone|Android|BlackBerry|IEMobile)/i', $ua)) {
-                $device = 'Mobile';
+            // Session check prevents duplicate spam within 30 seconds without failing on shared proxy IPs
+            $sessionHitKey = 'hit_' . md5($pageUrl);
+            if (!empty($_SESSION[$sessionHitKey]) && (time() - (int)$_SESSION[$sessionHitKey]) < 30) {
+                return;
             }
+            $_SESSION[$sessionHitKey] = time();
 
-            // Parse OS
-            $os = 'Unknown OS';
-            if (preg_match('/windows nt 10/i', $ua)) $os = 'Windows 10/11';
-            elseif (preg_match('/windows nt/i', $ua)) $os = 'Windows';
-            elseif (preg_match('/macintosh|mac os x/i', $ua)) $os = 'macOS';
-            elseif (preg_match('/iphone|ipad/i', $ua)) $os = 'iOS';
-            elseif (preg_match('/android/i', $ua)) $os = 'Android';
-            elseif (preg_match('/linux/i', $ua)) $os = 'Linux';
-
-            // Parse Browser
-            $browser = 'Unknown Browser';
-            if (preg_match('/edg/i', $ua)) $browser = 'Edge';
-            elseif (preg_match('/chrome/i', $ua)) $browser = 'Chrome';
-            elseif (preg_match('/firefox/i', $ua)) $browser = 'Firefox';
-            elseif (preg_match('/safari/i', $ua)) $browser = 'Safari';
-            elseif (preg_match('/opera|opr/i', $ua)) $browser = 'Opera';
-
-            $stmt = db()->prepare("
-                INSERT INTO visitor_logs (ip_address, page_url, user_agent, referrer_url, device_type, browser, os) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+            $stmt = $pdo->prepare("
+                INSERT INTO visitor_logs (ip_address, page_url, user_agent, referrer_url, device_type, browser, os, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ");
-            $stmt->execute([$ip, $url, $ua, $referrer ?: null, $device, $browser, $os]);
+            $stmt->execute([
+                $ip,
+                $pageUrl,
+                $ua,
+                $referrer,
+                $device,
+                $browser,
+                $os,
+                $currentAppTime
+            ]);
         } catch (Throwable $e) {
-            // Silently ignore log errors
+            error_log('Visitor Tracking Log Error: ' . $e->getMessage());
         }
     }
 }
+
+// Auto-run on every storefront page load
+track_storefront_visitor();
 
 /**
  * Log administrative activity to admin_activity_logs
