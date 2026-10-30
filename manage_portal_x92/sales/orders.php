@@ -111,6 +111,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Update Status
             $pdo->prepare('UPDATE orders SET status=? WHERE id=?')->execute([$status, $id]);
 
+            // Automatically journal revenue & COGS when order is officially delivered
+            if ($status === 'delivered' && function_exists('post_order_delivery_journals')) {
+                post_order_delivery_journals($id);
+            }
+
             // Audit Note
             $note = 'Status updated in admin panel to ' . ucfirst($status);
             if ($oldStatus !== $status && $status === 'confirmed') {
@@ -314,7 +319,6 @@ $logoUrl = site_setting('logo_url', '');
 
 <?php if ($detail): ?>
     <div class="invoice-card" id="printable-invoice">
-        <!-- Admin Controls Bar (No Print) -->
         <div class="section-heading no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 25px;">
             <div>
                 <div class="eyebrow">Order Inspection</div>
@@ -326,7 +330,6 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Invoice Brand Header -->
         <div class="invoice-header">
             <div>
                 <?php if ($logoUrl): ?>
@@ -343,7 +346,6 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Customer & Billing Information -->
         <div class="invoice-grid">
             <div class="invoice-box">
                 <b style="color:<?= e($invoiceColor) ?>; text-transform:uppercase; font-size:11px; letter-spacing:1px; display:block; margin-bottom:8px;">Billed To</b>
@@ -358,7 +360,6 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Line Items Table -->
         <table class="invoice-table">
             <thead>
                 <tr>
@@ -404,13 +405,11 @@ $logoUrl = site_setting('logo_url', '');
             </tbody>
         </table>
 
-        <!-- Summary Calculation & Internal Profit Breakdown -->
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:20px;">
             <div style="max-width:320px;">
                 <b style="color:#666; font-size:12px; text-transform:uppercase;">Payment Info:</b>
                 <p style="margin:4px 0 10px 0; font-weight:bold; color:<?= e($invoiceColor) ?>;">Cash on Delivery (COD)</p>
 
-                <!-- Internal Admin Profit Margin Card (No Print) -->
                 <div class="no-print" style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:6px; margin-top:10px;">
                     <b style="color:#166534; font-size:12px; text-transform:uppercase; display:block; margin-bottom:4px;">Order Profitability Analysis</b>
                     <div style="font-size:13px; display:flex; justify-content:space-between;"><span>Order COGS:</span> <b><?= money($orderCogs) ?></b></div>
@@ -445,12 +444,10 @@ $logoUrl = site_setting('logo_url', '');
             </div>
         </div>
 
-        <!-- Footer Note -->
         <div style="margin-top:40px; border-top:1px solid #eee; padding-top:15px; text-align:center; color:#777; font-size:13px;">
             <p style="margin:0; font-weight:600;"><?= e($invoiceNote) ?></p>
         </div>
 
-        <!-- Order Status Audit Log (No Print) -->
         <div class="no-print" style="border-top:1px solid var(--line,#eee); padding-top:20px; margin-top:30px;">
             <form method="post" class="inline-form" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                 <?= csrf_field() ?>
@@ -494,7 +491,8 @@ $logoUrl = site_setting('logo_url', '');
                     <a href="<?= e(url('admin/sales/orders')) ?>" class="button secondary" style="padding:6px 10px; font-size:13px;">Reset</a>
                 <?php endif; ?>
             </form>
-            <a href="<?= e(url('admin/sales/orders?export=csv' . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:6px 12px; font-size:13px;">📥 Export CSV</a><a href="<?= e(url('admin/sales/create_order')) ?>" class="button" style="padding:6px 12px; font-size:13px; background:#16a34a; border-color:#15803d;">
+            <a href="<?= e(url('admin/sales/orders?export=csv' . ($statusFilter ? '&status=' . urlencode($statusFilter) : '') . ($search ? '&q=' . urlencode($search) : ''))) ?>" class="button secondary" style="padding:6px 12px; font-size:13px;">📥 Export CSV</a>
+            <a href="<?= e(url('admin/sales/create_order')) ?>" class="button" style="padding:6px 12px; font-size:13px; background:#16a34a; border-color:#15803d;">
                 ➕ Create Phone Order
             </a>
         </div>

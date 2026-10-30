@@ -1057,3 +1057,124 @@ if (!function_exists('log_admin_activity')) {
         }
     }
 }
+
+/**
+ * Post an automated balanced double-entry journal to the General Ledger
+ */
+if (!function_exists('post_journal_entry')) {
+    function post_journal_entry(
+        string $refType,
+        ?int $refId,
+        string $entryDate,
+        string $memo,
+        array $lines,
+        ?int $adminId = null
+    ): int {
+        $totalDebit = 0.0;
+        $totalCredit = 0.0;
+
+        foreach ($lines as $l) {
+            $totalDebit += (float)($l['debit'] ?? 0);
+            $totalCredit += (float)($l['credit'] ?? 0);
+        }
+
+        // Enforce strict double-entry balance check (Debits must equal Credits)
+        if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+            throw new RuntimeException("Unbalanced journal entry: Debits (" . money($totalDebit) . ") do not equal Credits (" . money($totalCredit) . ")");
+        }
+
+        $pdo = db();
+        $inTrans = $pdo->inTransaction();
+        if (!$inTrans) $pdo->beginTransaction();
+
+        try {
+            $entryNo = 'JRN-' . date('ymd', strtotime($entryDate)) . '-' . strtoupper(bin2hex(random_bytes(3)));
+
+            $jStmt = $pdo->prepare('
+                INSERT INTO accounting_journals (entry_number, entry_date, reference_type, reference_id, memo, created_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ');
+            $jStmt->execute([$entryNo, $entryDate, $refType, $refId, $memo, $adminId]);
+            $journalId = (int)$pdo->lastInsertId();
+
+            $lStmt = $pdo->prepare('
+                INSERT INTO accounting_journal_lines (journal_id, account_code, debit, credit, description)
+                VALUES (?, ?, ?, ?, ?)
+            ');
+
+            foreach ($lines as $l) {
+                $lStmt->execute([
+                    $journalId,
+                    $l['account_code'],
+                    max(0.0, (float)($l['debit'] ?? 0)),
+                    max(0.0, (float)($l['credit'] ?? 0)),
+                    $l['description'] ?? $memo
+                ]);
+            }
+
+            if (!$inTrans) $pdo->commit();
+            return $journalId;
+        } catch (Throwable $e) {
+            if (!$inTrans) $pdo->rollBack();
+            error_log('Accounting Journal Posting Error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+}
+
+/**
+ * Automatically post double-entry journals for delivered/fulfilled customer orders
+ */
+if (!function_exists('post_order_delivery_journals')) {
+    function post_order_delivery_journals(int $orderId): void
+    {
+        try {
+            $pdo = db();
+            // Verify if already journaled to prevent duplicate ledger postings
+            $chk = $pdo->prepare("SELECT id FROM accounting_journals WHERE reference_type = 'order_sale' AND reference_id = ?");
+            $chk->execute([$orderId]);
+            if ($chk->fetch()) return;
+
+            $s = $pdo->prepare('SELECT * FROM orders WHERE id = ?');
+            $s->execute([$orderId]);
+            $order = $s->fetch(PDO::FETCH_ASSOC);
+            if (!$order) return;
+
+            // Fetch order items & cost
+            $itemsStmt = $pdo->prepare('SELECT quantity, cost_price FROM order_items WHERE order_id = ?');
+            $itemsStmt->execute([$orderId]);
+            $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $orderCogs = 0.0;
+            foreach ($items as $it) {
+                $orderCogs += ((float)$it['cost_price'] * (int)$it['quantity']);
+            }
+
+            $orderDate  = date('Y-m-d', strtotime($order['created_at']));
+            $total      = (float)$order['total'];
+            $shipping   = (float)$order['shipping_amount'];
+            $prodRev    = max(0.0, $total - $shipping);
+
+            // 1. Revenue Journal: Debit Courier Receivable, Credit Sales & Shipping
+            $revLines = [
+                ['account_code' => '1030', 'debit' => $total, 'credit' => 0.0, 'description' => "COD Receivable for Order #{$order['order_number']}"],
+                ['account_code' => '4010', 'debit' => 0.0, 'credit' => $prodRev, 'description' => "Net Product Sales #{$order['order_number']}"],
+            ];
+            if ($shipping > 0) {
+                $revLines[] = ['account_code' => '4020', 'debit' => 0.0, 'credit' => $shipping, 'description' => "Delivery Fee Collected #{$order['order_number']}"];
+            }
+            post_journal_entry('order_sale', $orderId, $orderDate, "Customer Order #{$order['order_number']}", $revLines);
+
+            // 2. COGS Journal: Debit COGS Expense, Credit Inventory Asset
+            if ($orderCogs > 0) {
+                $cogsLines = [
+                    ['account_code' => '5010', 'debit' => $orderCogs, 'credit' => 0.0, 'description' => "COGS for Order #{$order['order_number']}"],
+                    ['account_code' => '1040', 'debit' => 0.0, 'credit' => $orderCogs, 'description' => "Inventory Relief #{$order['order_number']}"]
+                ];
+                post_journal_entry('cogs', $orderId, $orderDate, "COGS Recognition #{$order['order_number']}", $cogsLines);
+            }
+        } catch (Throwable $e) {
+            error_log('Automated Order Journal Error: ' . $e->getMessage());
+        }
+    }
+}
